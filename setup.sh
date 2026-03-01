@@ -109,18 +109,53 @@ echo "[3/8] Checking Ollama..."
 
 OLLAMA_URL="${OLLAMA_URL:-}"
 
+install_ollama_binary() {
+    # Download Ollama binary directly from GitHub Releases.
+    # Used on Termux where the official install script requires root.
+    local INSTALL_DIR="$HOME/.local/bin"
+    local ARCH
+    ARCH=$(uname -m)
+
+    # Map to Ollama release names
+    case "$ARCH" in
+        aarch64|arm64) ARCH="arm64" ;;
+        x86_64|amd64)  ARCH="amd64" ;;
+        *)
+            echo "  WARNING: Unsupported architecture for Ollama: $ARCH"
+            return 1
+            ;;
+    esac
+
+    local OS
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+
+    mkdir -p "$INSTALL_DIR"
+    echo "  Downloading ollama-${OS}-${ARCH}..."
+    if curl -fL -o "$INSTALL_DIR/ollama" \
+        "https://github.com/ollama/ollama/releases/latest/download/ollama-${OS}-${ARCH}" 2>&1; then
+        chmod +x "$INSTALL_DIR/ollama"
+        export PATH="$INSTALL_DIR:$PATH"
+        if command -v ollama &>/dev/null; then
+            echo "  Ollama: installed to $INSTALL_DIR/ollama"
+            return 0
+        fi
+    fi
+    echo "  WARNING: Ollama binary download failed."
+    return 1
+}
+
 if $IS_ANDROID; then
-    # Ollama can't be installed on Termux (requires root)
-    if [ -n "$OLLAMA_URL" ]; then
-        echo "  Using pre-configured OLLAMA_URL: $OLLAMA_URL"
+    # Official install script requires root; download binary directly
+    if command -v ollama &>/dev/null; then
+        echo "  Ollama: already installed"
+        OLLAMA_URL="http://localhost:11434"
     else
-        echo "  Ollama cannot be installed directly on Android/Termux."
-        echo "  To use RAG search, point to a remote Ollama server:"
-        echo ""
-        echo "    export OLLAMA_URL=http://YOUR_PC_IP:11434"
-        echo "    ./setup.sh"
-        echo ""
-        echo "  TIP: Run 'ollama serve' on your PC and use its IP address."
+        echo "  Installing Ollama (direct binary download for Termux)..."
+        if install_ollama_binary; then
+            OLLAMA_URL="http://localhost:11434"
+        else
+            echo "  Ollama could not be installed. RAG search will be unavailable."
+        fi
     fi
 elif $IS_WSL2; then
     WIN_HOST=$(ip route show default | awk '{print $3}')
@@ -165,18 +200,22 @@ if [ -n "$OLLAMA_URL" ]; then
     if curl -sf --connect-timeout 3 "$OLLAMA_URL/api/tags" &>/dev/null; then
         echo "  Ollama is running at $OLLAMA_URL"
     else
-        if ! $IS_ANDROID && command -v ollama &>/dev/null; then
+        if command -v ollama &>/dev/null; then
             echo "  Starting Ollama..."
             ollama serve &>/dev/null &
-            sleep 2
-            if curl -sf "$OLLAMA_URL/api/tags" &>/dev/null; then
-                echo "  Ollama started successfully"
-            else
-                echo "  WARNING: Could not start Ollama."
+            # Wait up to 10 seconds for startup
+            for i in $(seq 1 10); do
+                if curl -sf --connect-timeout 1 "$OLLAMA_URL/api/tags" &>/dev/null; then
+                    echo "  Ollama started successfully"
+                    break
+                fi
+                sleep 1
+            done
+            if ! curl -sf --connect-timeout 1 "$OLLAMA_URL/api/tags" &>/dev/null; then
+                echo "  WARNING: Ollama did not start. Try running 'ollama serve' manually."
             fi
         else
             echo "  WARNING: Cannot reach Ollama at $OLLAMA_URL"
-            echo "  Make sure the Ollama server is running on the remote host."
         fi
     fi
 else
@@ -271,16 +310,6 @@ if [ -n "$OLLAMA_URL" ] && curl -sf --connect-timeout 3 "$OLLAMA_URL/api/tags" &
     if $IS_WSL2 && [ "$OLLAMA_URL" != "http://localhost:11434" ]; then
         # WSL2 with Windows Ollama: use API to pull
         echo "  Using Windows Ollama at $OLLAMA_URL"
-        curl -sf "$OLLAMA_URL/api/pull" -d '{"name":"bge-m3"}' | while IFS= read -r line; do
-            status=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null)
-            if [ -n "$status" ]; then
-                printf "\r  %s" "$status"
-            fi
-        done
-        echo ""
-    elif $IS_ANDROID; then
-        # Android: use API to pull (no local ollama command)
-        echo "  Using remote Ollama at $OLLAMA_URL"
         curl -sf "$OLLAMA_URL/api/pull" -d '{"name":"bge-m3"}' | while IFS= read -r line; do
             status=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null)
             if [ -n "$status" ]; then
