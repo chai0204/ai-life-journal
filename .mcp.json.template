@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "life-rag": {
+      "type": "stdio",
+      "command": "__REPO_ROOT__/rag-mcp/run.sh",
+      "env": {
+        "LIFE_REPO_PATH": "__REPO_ROOT__"
+      }
+    }
+  }
+}

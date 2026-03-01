@@ -1,0 +1,34 @@
+#!/bin/bash
+# life-rag-mcp: Incremental index update after commit
+# Runs in background to avoid slowing down git operations
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+RAG_DIR="$REPO_ROOT/rag-mcp"
+TARGET_DIRS="journal/|knowledge/|thoughts/|profile/|works/|references/"
+
+UV="$(command -v uv)"
+if [ -z "$UV" ]; then
+    exit 0
+fi
+
+# Auto-detect Ollama URL on WSL2
+if [ -f /proc/sys/fs/binfmt_misc/WSLInterop ]; then
+    WIN_HOST=$(ip route show default | awk '{print $3}')
+    export OLLAMA_URL="${OLLAMA_URL:-http://${WIN_HOST}:11434}"
+fi
+
+# Get changed .md files in target directories
+CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -E "^($TARGET_DIRS)" | grep '\.md$')
+
+if [ -z "$CHANGED_FILES" ]; then
+    exit 0
+fi
+
+# Build args array
+ARGS="--files"
+for f in $CHANGED_FILES; do
+    ARGS="$ARGS $f"
+done
+
+# Run indexer in background
+(cd "$REPO_ROOT" && "$UV" --directory "$RAG_DIR" run life-rag-index $ARGS) &>/dev/null &

@@ -1,0 +1,17 @@
+# Generated MCP config (contains absolute paths)
+.mcp.json
+
+# RAG database and virtual environment
+rag-mcp/data/
+rag-mcp/.venv/
+rag-mcp/uv.lock
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.python-version
+
+# Environment / secrets
+.env
+*.env
