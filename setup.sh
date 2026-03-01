@@ -4,7 +4,7 @@ set -euo pipefail
 # ──────────────────────────────────────────────
 # ai-life-journal setup script
 # One-command setup: prerequisites, RAG server, git hooks
-# Supports both uv (preferred) and pip+venv (fallback for Termux etc.)
+# Supports: Linux, macOS, WSL2, Termux (Android)
 # ──────────────────────────────────────────────
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -14,8 +14,24 @@ VENV_DIR="$RAG_DIR/.venv"
 # Package manager: "uv" or "pip"
 PKG_MANAGER=""
 
+# Platform detection
+IS_ANDROID=false
+IS_WSL2=false
+if [ "$(uname -o 2>/dev/null)" = "Android" ]; then
+    IS_ANDROID=true
+elif [ -f /proc/sys/fs/binfmt_misc/WSLInterop ]; then
+    IS_WSL2=true
+fi
+
 echo "=== ai-life-journal setup ==="
 echo "Repository root: $REPO_ROOT"
+if $IS_ANDROID; then
+    echo "Platform: Android (Termux)"
+elif $IS_WSL2; then
+    echo "Platform: WSL2"
+else
+    echo "Platform: $(uname -s)"
+fi
 echo ""
 
 # ── 1. Check prerequisites ──
@@ -52,6 +68,15 @@ echo "[2/8] Setting up Python package manager..."
 if command -v uv &>/dev/null; then
     PKG_MANAGER="uv"
     echo "  uv: already installed ($(uv --version))"
+elif $IS_ANDROID; then
+    # uv has no Android binary; go straight to pip
+    PKG_MANAGER="pip"
+    echo "  uv: not available on Android, using pip"
+    echo "  pip: $(python3 -m pip --version 2>/dev/null || echo 'not found')"
+    if ! python3 -m pip --version &>/dev/null; then
+        echo "ERROR: pip is not available. Run: pkg install python-pip"
+        exit 1
+    fi
 else
     echo "  uv not found. Attempting to install..."
     if curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh 2>&1; then
@@ -82,10 +107,22 @@ echo "  Using: $PKG_MANAGER"
 echo ""
 echo "[3/8] Checking Ollama..."
 
-OLLAMA_URL=""
+OLLAMA_URL="${OLLAMA_URL:-}"
 
-# WSL2 detection: check if Windows-side Ollama is reachable
-if [ -f /proc/sys/fs/binfmt_misc/WSLInterop ]; then
+if $IS_ANDROID; then
+    # Ollama can't be installed on Termux (requires root)
+    if [ -n "$OLLAMA_URL" ]; then
+        echo "  Using pre-configured OLLAMA_URL: $OLLAMA_URL"
+    else
+        echo "  Ollama cannot be installed directly on Android/Termux."
+        echo "  To use RAG search, point to a remote Ollama server:"
+        echo ""
+        echo "    export OLLAMA_URL=http://YOUR_PC_IP:11434"
+        echo "    ./setup.sh"
+        echo ""
+        echo "  TIP: Run 'ollama serve' on your PC and use its IP address."
+    fi
+elif $IS_WSL2; then
     WIN_HOST=$(ip route show default | awk '{print $3}')
     echo "  WSL2 detected. Checking Windows host ($WIN_HOST) for Ollama..."
     if curl -sf "http://${WIN_HOST}:11434/api/tags" &>/dev/null; then
@@ -96,24 +133,25 @@ if [ -f /proc/sys/fs/binfmt_misc/WSLInterop ]; then
         echo "  TIP: Install Ollama on Windows (https://ollama.com) and restart setup."
         echo "  Alternatively, install Ollama in WSL2 directly."
     fi
-fi
-
-if [ -z "$OLLAMA_URL" ]; then
-    if command -v ollama &>/dev/null; then
-        echo "  Ollama: already installed"
-        OLLAMA_URL="http://localhost:11434"
-    else
-        echo "  Installing Ollama..."
-        if curl -fsSL https://ollama.com/install.sh 2>/dev/null | sh 2>&1; then
-            if command -v ollama &>/dev/null; then
-                echo "  Ollama: installed"
-                OLLAMA_URL="http://localhost:11434"
+else
+    # Linux / macOS
+    if [ -z "$OLLAMA_URL" ]; then
+        if command -v ollama &>/dev/null; then
+            echo "  Ollama: already installed"
+            OLLAMA_URL="http://localhost:11434"
+        else
+            echo "  Installing Ollama..."
+            if curl -fsSL https://ollama.com/install.sh 2>/dev/null | sh 2>&1; then
+                if command -v ollama &>/dev/null; then
+                    echo "  Ollama: installed"
+                    OLLAMA_URL="http://localhost:11434"
+                fi
             fi
-        fi
-        if [ -z "$OLLAMA_URL" ]; then
-            echo "  WARNING: Ollama installation failed or not supported on this platform."
-            echo "  You can set OLLAMA_URL to point to a remote Ollama server."
-            echo "  Example: export OLLAMA_URL=http://YOUR_SERVER:11434"
+            if [ -z "$OLLAMA_URL" ]; then
+                echo "  WARNING: Ollama installation failed."
+                echo "  You can set OLLAMA_URL to point to a remote Ollama server."
+                echo "  Example: export OLLAMA_URL=http://YOUR_SERVER:11434"
+            fi
         fi
     fi
 fi
@@ -124,23 +162,25 @@ echo ""
 echo "[4/8] Checking Ollama service..."
 
 if [ -n "$OLLAMA_URL" ]; then
-    if curl -sf "$OLLAMA_URL/api/tags" &>/dev/null; then
+    if curl -sf --connect-timeout 3 "$OLLAMA_URL/api/tags" &>/dev/null; then
         echo "  Ollama is running at $OLLAMA_URL"
     else
-        echo "  Starting Ollama..."
-        if command -v ollama &>/dev/null; then
+        if ! $IS_ANDROID && command -v ollama &>/dev/null; then
+            echo "  Starting Ollama..."
             ollama serve &>/dev/null &
             sleep 2
-        fi
-        if curl -sf "$OLLAMA_URL/api/tags" &>/dev/null; then
-            echo "  Ollama started successfully"
+            if curl -sf "$OLLAMA_URL/api/tags" &>/dev/null; then
+                echo "  Ollama started successfully"
+            else
+                echo "  WARNING: Could not start Ollama."
+            fi
         else
-            echo "  WARNING: Could not start Ollama. Start it manually with: ollama serve"
-            echo "  Or set OLLAMA_URL to a remote server: export OLLAMA_URL=http://HOST:11434"
+            echo "  WARNING: Cannot reach Ollama at $OLLAMA_URL"
+            echo "  Make sure the Ollama server is running on the remote host."
         fi
     fi
 else
-    echo "  Skipped (Ollama not available)"
+    echo "  Skipped (Ollama not configured)"
 fi
 
 # ── 5. Generate .mcp.json ──
@@ -174,15 +214,50 @@ fi
 echo ""
 echo "[7/8] Installing Python dependencies..."
 
-if [ "$PKG_MANAGER" = "uv" ]; then
-    (cd "$RAG_DIR" && uv sync)
-else
-    # pip + venv fallback
+install_with_pip() {
+    # Create venv if needed
     if [ ! -d "$VENV_DIR" ]; then
         python3 -m venv "$VENV_DIR"
     fi
     "$VENV_DIR/bin/pip" install --upgrade pip 2>&1 | tail -1
-    "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1
+
+    # On Android/Termux, sqlite-vec has no android wheel.
+    # The manylinux aarch64 wheel is binary-compatible, so we
+    # download it and extract into site-packages manually.
+    if $IS_ANDROID; then
+        echo "  Installing sqlite-vec (Android workaround)..."
+        TMPDIR_WHL=$(mktemp -d)
+        PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')
+        SITE_PACKAGES=$("$VENV_DIR/bin/python3" -c "import site; print(site.getsitepackages()[0])")
+
+        # Download the manylinux aarch64 wheel
+        "$VENV_DIR/bin/pip" download sqlite-vec \
+            --only-binary=:all: \
+            --platform manylinux_2_17_aarch64 \
+            --python-version "$PY_VER" \
+            -d "$TMPDIR_WHL" 2>&1 | tail -1
+
+        # Wheels are zip files — extract directly into site-packages
+        if ls "$TMPDIR_WHL"/sqlite_vec*.whl &>/dev/null; then
+            unzip -o "$TMPDIR_WHL"/sqlite_vec*.whl -d "$SITE_PACKAGES" >/dev/null
+            echo "  sqlite-vec: installed via manylinux wheel"
+        else
+            echo "  WARNING: Could not download sqlite-vec wheel"
+        fi
+        rm -rf "$TMPDIR_WHL"
+
+        # Install remaining dependencies (skip sqlite-vec since already installed)
+        "$VENV_DIR/bin/pip" install -e "$RAG_DIR" --no-deps 2>&1 | tail -1
+        "$VENV_DIR/bin/pip" install httpx mcp pyyaml 2>&1 | tail -1
+    else
+        "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1
+    fi
+}
+
+if [ "$PKG_MANAGER" = "uv" ]; then
+    (cd "$RAG_DIR" && uv sync)
+else
+    install_with_pip
 fi
 echo "  Dependencies installed ($PKG_MANAGER)"
 
@@ -191,11 +266,21 @@ echo "  Dependencies installed ($PKG_MANAGER)"
 echo ""
 echo "[8/8] Setting up embedding model and index..."
 
-if [ -n "$OLLAMA_URL" ] && curl -sf "$OLLAMA_URL/api/tags" &>/dev/null; then
+if [ -n "$OLLAMA_URL" ] && curl -sf --connect-timeout 3 "$OLLAMA_URL/api/tags" &>/dev/null; then
     echo "  Pulling bge-m3 embedding model (this may take a few minutes on first run)..."
-    if [ -f /proc/sys/fs/binfmt_misc/WSLInterop ] && [ "$OLLAMA_URL" != "http://localhost:11434" ]; then
+    if $IS_WSL2 && [ "$OLLAMA_URL" != "http://localhost:11434" ]; then
         # WSL2 with Windows Ollama: use API to pull
         echo "  Using Windows Ollama at $OLLAMA_URL"
+        curl -sf "$OLLAMA_URL/api/pull" -d '{"name":"bge-m3"}' | while IFS= read -r line; do
+            status=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null)
+            if [ -n "$status" ]; then
+                printf "\r  %s" "$status"
+            fi
+        done
+        echo ""
+    elif $IS_ANDROID; then
+        # Android: use API to pull (no local ollama command)
+        echo "  Using remote Ollama at $OLLAMA_URL"
         curl -sf "$OLLAMA_URL/api/pull" -d '{"name":"bge-m3"}' | while IFS= read -r line; do
             status=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null)
             if [ -n "$status" ]; then
@@ -229,8 +314,14 @@ if [ -n "$OLLAMA_URL" ] && curl -sf "$OLLAMA_URL/api/tags" &>/dev/null; then
         }
     fi
 else
-    echo "  Skipped (Ollama not reachable). Run setup.sh again after starting Ollama."
-    echo "  Or set OLLAMA_URL to a remote server: export OLLAMA_URL=http://HOST:11434"
+    echo "  Skipped (Ollama not reachable)."
+    if [ -z "$OLLAMA_URL" ]; then
+        echo "  To enable RAG search, set OLLAMA_URL and re-run setup.sh:"
+        echo "    export OLLAMA_URL=http://YOUR_SERVER:11434"
+        echo "    ./setup.sh"
+    else
+        echo "  Make sure Ollama is running at $OLLAMA_URL and re-run setup.sh."
+    fi
 fi
 
 # ── Done ──
