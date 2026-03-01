@@ -278,7 +278,7 @@ install_with_pip() {
         SITE_PACKAGES=$("$VENV_DIR/bin/python3" -c "import site; print(site.getsitepackages()[0])")
 
         # Packages that need the manylinux wheel workaround on Termux
-        NATIVE_PKGS="sqlite-vec pydantic-core cffi cryptography rpds-py"
+        NATIVE_PKGS="sqlite-vec pydantic-core cffi cryptography rpds-py pyyaml"
 
         for pkg in $NATIVE_PKGS; do
             pkg_under=$(echo "$pkg" | tr '-' '_')
@@ -290,8 +290,10 @@ install_with_pip() {
                 -d "$TMPDIR_WHL" 2>&1 | tail -1
 
             # Wheels are zip files — extract directly into site-packages
-            if ls "$TMPDIR_WHL"/${pkg_under}*.whl &>/dev/null; then
-                unzip -o "$TMPDIR_WHL"/${pkg_under}*.whl -d "$SITE_PACKAGES" >/dev/null
+            # Use find -iname for case-insensitive match (e.g. PyYAML vs pyyaml)
+            WHL_FILE=$(find "$TMPDIR_WHL" -maxdepth 1 -iname "${pkg_under}*.whl" | head -1)
+            if [ -n "$WHL_FILE" ]; then
+                unzip -o "$WHL_FILE" -d "$SITE_PACKAGES" >/dev/null
                 echo "  $pkg: installed via manylinux wheel"
             else
                 echo "  WARNING: Could not download $pkg wheel"
