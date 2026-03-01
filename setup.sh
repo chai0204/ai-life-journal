@@ -306,9 +306,10 @@ install_with_pip() {
         # Install the project without dependency resolution
         "$VENV_DIR/bin/pip" install --no-deps -e "$RAG_DIR" 2>&1 | tail -1
 
-        # Install remaining pure-Python dependencies using only pre-built wheels
-        # (never build from source — native packages are already in site-packages)
-        "$VENV_DIR/bin/pip" install httpx "mcp>=1.2.0" pyyaml --only-binary :all: 2>&1 | tail -1
+        # Install remaining dependencies
+        # Native packages are already in site-packages via manylinux wheels,
+        # so pip will see them as satisfied and skip them
+        "$VENV_DIR/bin/pip" install httpx "mcp>=1.2.0" pyyaml 2>&1 | tail -1
     else
         "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1
     fi
