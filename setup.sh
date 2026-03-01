@@ -276,6 +276,10 @@ install_with_pip() {
         echo "  Installing build tools (rust, binutils)..."
         pkg install -y rust binutils 2>&1 | tail -3
 
+        # Set Android API level for maturin (Rust build tool)
+        export ANDROID_API_LEVEL=$(getprop ro.build.version.sdk 2>/dev/null || echo "24")
+        echo "  Android API level: $ANDROID_API_LEVEL"
+
         # Install dependencies — native extensions build from source
         echo "  Installing dependencies (building native extensions from source)..."
         echo "  NOTE: First run may take 10+ minutes for Rust compilation."
