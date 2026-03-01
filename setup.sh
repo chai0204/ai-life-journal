@@ -268,36 +268,40 @@ install_with_pip() {
     fi
     "$VENV_DIR/bin/pip" install --upgrade pip 2>&1 | tail -1
 
-    # On Android/Termux, pip cannot install native-extension packages normally.
-    # Strategy: use pip to resolve & download ALL deps as manylinux/universal
-    # wheels, then extract them directly into site-packages (bypassing pip's
-    # platform compatibility check entirely).
+    # On Android/Termux, manylinux .so files are incompatible with Bionic libc.
+    # Strategy: build native extensions from source using Rust/C compilers,
+    # except sqlite-vec (no source dist, but its simple C .so works via manylinux).
     if $IS_ANDROID; then
-        echo "  Downloading all dependencies as wheels (Android workaround)..."
+        # Install build tools for native extensions (Rust for pydantic-core etc.)
+        echo "  Installing build tools (rust, binutils)..."
+        pkg install -y rust binutils 2>&1 | tail -3
+
+        # Install dependencies — native extensions build from source
+        echo "  Installing dependencies (building native extensions from source)..."
+        echo "  NOTE: First run may take 10+ minutes for Rust compilation."
+        "$VENV_DIR/bin/pip" install httpx "mcp>=1.2.0" pyyaml 2>&1
+
+        # sqlite-vec: no source distribution available, but its simple C extension
+        # works via manylinux wheel on Termux (confirmed working)
+        echo "  Installing sqlite-vec via manylinux wheel..."
         TMPDIR_WHL=$(mktemp -d)
         PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')
         SITE_PACKAGES=$("$VENV_DIR/bin/python3" -c "import site; print(site.getsitepackages()[0])")
 
-        # Download ALL deps in one pass — pip resolves versions consistently.
-        # manylinux wheels for native packages, universal wheels for pure-Python.
-        "$VENV_DIR/bin/pip" download \
-            httpx "mcp>=1.2.0" pyyaml sqlite-vec \
+        "$VENV_DIR/bin/pip" download sqlite-vec \
             --only-binary=:all: \
             --platform manylinux_2_17_aarch64 \
             --python-version "$PY_VER" \
-            -d "$TMPDIR_WHL" 2>&1
+            -d "$TMPDIR_WHL" 2>&1 | tail -1
 
-        # Extract ALL wheels into site-packages
-        WHL_COUNT=0
         for whl in "$TMPDIR_WHL"/*.whl; do
             [ -f "$whl" ] || continue
             unzip -o "$whl" -d "$SITE_PACKAGES" >/dev/null
-            WHL_COUNT=$((WHL_COUNT + 1))
         done
         rm -rf "$TMPDIR_WHL"
-        echo "  Installed $WHL_COUNT packages via wheel extraction"
+        echo "  sqlite-vec: installed"
 
-        # Install the project itself (no deps — already in site-packages)
+        # Install the project itself
         "$VENV_DIR/bin/pip" install --no-deps -e "$RAG_DIR" 2>&1 | tail -1
     else
         "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1
