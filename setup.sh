@@ -301,9 +301,12 @@ install_with_pip() {
         done
         rm -rf "$TMPDIR_WHL"
 
-        # Install the project and remaining pure-Python dependencies
-        # Pre-installed native packages are detected via dist-info and skipped
-        "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1
+        # Install the project without dependency resolution
+        "$VENV_DIR/bin/pip" install --no-deps -e "$RAG_DIR" 2>&1 | tail -1
+
+        # Install remaining pure-Python dependencies using only pre-built wheels
+        # (never build from source — native packages are already in site-packages)
+        "$VENV_DIR/bin/pip" install httpx "mcp>=1.2.0" pyyaml --only-binary :all: 2>&1 | tail -1
     else
         "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1
     fi
