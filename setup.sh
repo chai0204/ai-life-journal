@@ -4,10 +4,15 @@ set -euo pipefail
 # ──────────────────────────────────────────────
 # ai-life-journal setup script
 # One-command setup: prerequisites, RAG server, git hooks
+# Supports both uv (preferred) and pip+venv (fallback for Termux etc.)
 # ──────────────────────────────────────────────
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 RAG_DIR="$REPO_ROOT/rag-mcp"
+VENV_DIR="$RAG_DIR/.venv"
+
+# Package manager: "uv" or "pip"
+PKG_MANAGER=""
 
 echo "=== ai-life-journal setup ==="
 echo "Repository root: $REPO_ROOT"
@@ -39,25 +44,38 @@ else
     exit 1
 fi
 
-# ── 2. Install uv ──
+# ── 2. Install uv (with pip fallback) ──
 
 echo ""
-echo "[2/8] Checking uv..."
+echo "[2/8] Setting up Python package manager..."
 
 if command -v uv &>/dev/null; then
+    PKG_MANAGER="uv"
     echo "  uv: already installed ($(uv --version))"
 else
-    echo "  Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    # Source the updated PATH
-    export PATH="$HOME/.local/bin:$PATH"
-    if command -v uv &>/dev/null; then
-        echo "  uv: installed ($(uv --version))"
-    else
-        echo "ERROR: uv installation failed."
-        exit 1
+    echo "  uv not found. Attempting to install..."
+    if curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh 2>&1; then
+        export PATH="$HOME/.local/bin:$PATH"
+        if command -v uv &>/dev/null; then
+            PKG_MANAGER="uv"
+            echo "  uv: installed ($(uv --version))"
+        fi
+    fi
+
+    if [ -z "$PKG_MANAGER" ]; then
+        echo "  uv installation not available on this platform."
+        echo "  Falling back to pip + venv..."
+        if python3 -m pip --version &>/dev/null; then
+            PKG_MANAGER="pip"
+            echo "  pip: $(python3 -m pip --version)"
+        else
+            echo "ERROR: Neither uv nor pip is available."
+            exit 1
+        fi
     fi
 fi
+
+echo "  Using: $PKG_MANAGER"
 
 # ── 3. Install Ollama ──
 
@@ -86,13 +104,16 @@ if [ -z "$OLLAMA_URL" ]; then
         OLLAMA_URL="http://localhost:11434"
     else
         echo "  Installing Ollama..."
-        curl -fsSL https://ollama.com/install.sh | sh
-        if command -v ollama &>/dev/null; then
-            echo "  Ollama: installed"
-            OLLAMA_URL="http://localhost:11434"
-        else
-            echo "WARNING: Ollama installation failed. You can install it manually later."
-            echo "         RAG search will not work without Ollama."
+        if curl -fsSL https://ollama.com/install.sh 2>/dev/null | sh 2>&1; then
+            if command -v ollama &>/dev/null; then
+                echo "  Ollama: installed"
+                OLLAMA_URL="http://localhost:11434"
+            fi
+        fi
+        if [ -z "$OLLAMA_URL" ]; then
+            echo "  WARNING: Ollama installation failed or not supported on this platform."
+            echo "  You can set OLLAMA_URL to point to a remote Ollama server."
+            echo "  Example: export OLLAMA_URL=http://YOUR_SERVER:11434"
         fi
     fi
 fi
@@ -107,12 +128,15 @@ if [ -n "$OLLAMA_URL" ]; then
         echo "  Ollama is running at $OLLAMA_URL"
     else
         echo "  Starting Ollama..."
-        ollama serve &>/dev/null &
-        sleep 2
+        if command -v ollama &>/dev/null; then
+            ollama serve &>/dev/null &
+            sleep 2
+        fi
         if curl -sf "$OLLAMA_URL/api/tags" &>/dev/null; then
             echo "  Ollama started successfully"
         else
-            echo "WARNING: Could not start Ollama. Start it manually with: ollama serve"
+            echo "  WARNING: Could not start Ollama. Start it manually with: ollama serve"
+            echo "  Or set OLLAMA_URL to a remote server: export OLLAMA_URL=http://HOST:11434"
         fi
     fi
 else
@@ -150,15 +174,24 @@ fi
 echo ""
 echo "[7/8] Installing Python dependencies..."
 
-(cd "$RAG_DIR" && uv sync)
-echo "  Dependencies installed"
+if [ "$PKG_MANAGER" = "uv" ]; then
+    (cd "$RAG_DIR" && uv sync)
+else
+    # pip + venv fallback
+    if [ ! -d "$VENV_DIR" ]; then
+        python3 -m venv "$VENV_DIR"
+    fi
+    "$VENV_DIR/bin/pip" install --upgrade pip 2>&1 | tail -1
+    "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1
+fi
+echo "  Dependencies installed ($PKG_MANAGER)"
 
 # ── 8. Pull embedding model & build index ──
 
 echo ""
 echo "[8/8] Setting up embedding model and index..."
 
-if [ -n "$OLLAMA_URL" ]; then
+if [ -n "$OLLAMA_URL" ] && curl -sf "$OLLAMA_URL/api/tags" &>/dev/null; then
     echo "  Pulling bge-m3 embedding model (this may take a few minutes on first run)..."
     if [ -f /proc/sys/fs/binfmt_misc/WSLInterop ] && [ "$OLLAMA_URL" != "http://localhost:11434" ]; then
         # WSL2 with Windows Ollama: use API to pull
@@ -186,11 +219,18 @@ if [ -n "$OLLAMA_URL" ]; then
     echo "  Building initial RAG index..."
     export OLLAMA_URL
     export LIFE_REPO_PATH="$REPO_ROOT"
-    (cd "$REPO_ROOT" && uv --directory "$RAG_DIR" run life-rag-index --full) || {
-        echo "  WARNING: Initial index build failed (this is OK for an empty repo)"
-    }
+    if [ "$PKG_MANAGER" = "uv" ]; then
+        (cd "$REPO_ROOT" && uv --directory "$RAG_DIR" run life-rag-index --full) || {
+            echo "  WARNING: Initial index build failed (this is OK for an empty repo)"
+        }
+    else
+        "$VENV_DIR/bin/life-rag-index" --full || {
+            echo "  WARNING: Initial index build failed (this is OK for an empty repo)"
+        }
+    fi
 else
-    echo "  Skipped (Ollama not available). Run setup.sh again after installing Ollama."
+    echo "  Skipped (Ollama not reachable). Run setup.sh again after starting Ollama."
+    echo "  Or set OLLAMA_URL to a remote server: export OLLAMA_URL=http://HOST:11434"
 fi
 
 # ── Done ──

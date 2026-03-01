@@ -1,15 +1,12 @@
 #!/bin/bash
 # life-rag-mcp: Incremental index update after commit
 # Runs in background to avoid slowing down git operations
+# Supports both uv and pip+venv
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 RAG_DIR="$REPO_ROOT/rag-mcp"
+VENV_DIR="$RAG_DIR/.venv"
 TARGET_DIRS="journal/|knowledge/|thoughts/|profile/|works/|references/"
-
-UV="$(command -v uv)"
-if [ -z "$UV" ]; then
-    exit 0
-fi
 
 # Auto-detect Ollama URL on WSL2
 if [ -f /proc/sys/fs/binfmt_misc/WSLInterop ]; then
@@ -30,5 +27,9 @@ for f in $CHANGED_FILES; do
     ARGS="$ARGS $f"
 done
 
-# Run indexer in background
-(cd "$REPO_ROOT" && "$UV" --directory "$RAG_DIR" run life-rag-index $ARGS) &>/dev/null &
+# Run indexer in background (prefer uv, fall back to venv)
+if command -v uv &>/dev/null; then
+    (cd "$REPO_ROOT" && uv --directory "$RAG_DIR" run life-rag-index $ARGS) &>/dev/null &
+elif [ -x "$VENV_DIR/bin/life-rag-index" ]; then
+    (cd "$REPO_ROOT" && "$VENV_DIR/bin/life-rag-index" $ARGS) &>/dev/null &
+fi

@@ -1,9 +1,11 @@
 #!/bin/bash
 # Wrapper script to launch life-rag-mcp
 # Ensures Ollama is running before starting the MCP server
+# Supports both uv and pip+venv
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VENV_DIR="$SCRIPT_DIR/.venv"
 
 export LIFE_REPO_PATH="${LIFE_REPO_PATH:-$REPO_ROOT}"
 
@@ -15,7 +17,7 @@ if [ -f /proc/sys/fs/binfmt_misc/WSLInterop ]; then
     WIN_HOST=$(ip route show default | awk '{print $3}')
 fi
 
-if [ -z "$OLLAMA_URL" ]; then
+if [ -z "${OLLAMA_URL:-}" ]; then
     if $IS_WSL2; then
         # WSL2: try Windows host first, then localhost
         if curl -sf --connect-timeout 2 "http://${WIN_HOST}:11434/api/tags" &>/dev/null; then
@@ -74,10 +76,12 @@ ensure_ollama
 
 # ── Launch MCP server ──
 
-UV="$(command -v uv)"
-if [ -z "$UV" ]; then
-    echo "Error: uv not found. Run setup.sh first." >&2
+# Prefer uv, fall back to venv
+if command -v uv &>/dev/null; then
+    exec uv --directory "$SCRIPT_DIR" run life-rag-mcp
+elif [ -x "$VENV_DIR/bin/life-rag-mcp" ]; then
+    exec "$VENV_DIR/bin/life-rag-mcp"
+else
+    echo "Error: Neither uv nor venv found. Run setup.sh first." >&2
     exit 1
 fi
-
-exec "$UV" --directory "$SCRIPT_DIR" run life-rag-mcp
