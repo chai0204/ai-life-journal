@@ -110,7 +110,7 @@ echo "[3/8] Checking Ollama..."
 OLLAMA_URL="${OLLAMA_URL:-}"
 
 install_ollama_binary() {
-    # Download Ollama binary directly from GitHub Releases.
+    # Download Ollama binary directly from ollama.com.
     # Used on Termux where the official install script requires root.
     local INSTALL_DIR="$HOME/.local/bin"
     local ARCH
@@ -126,13 +126,10 @@ install_ollama_binary() {
             ;;
     esac
 
-    local OS
-    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-
     mkdir -p "$INSTALL_DIR"
-    echo "  Downloading ollama-${OS}-${ARCH}..."
+    echo "  Downloading ollama-linux-${ARCH}..."
     if curl -fL -o "$INSTALL_DIR/ollama" \
-        "https://github.com/ollama/ollama/releases/latest/download/ollama-${OS}-${ARCH}" 2>&1; then
+        "https://ollama.com/download/ollama-linux-${ARCH}" 2>&1; then
         chmod +x "$INSTALL_DIR/ollama"
         export PATH="$INSTALL_DIR:$PATH"
         if command -v ollama &>/dev/null; then
@@ -260,34 +257,42 @@ install_with_pip() {
     fi
     "$VENV_DIR/bin/pip" install --upgrade pip 2>&1 | tail -1
 
-    # On Android/Termux, sqlite-vec has no android wheel.
-    # The manylinux aarch64 wheel is binary-compatible, so we
-    # download it and extract into site-packages manually.
+    # On Android/Termux, many native-extension packages have no android wheel.
+    # The manylinux aarch64 wheels are binary-compatible, so we download
+    # them and extract into site-packages manually before pip install.
     if $IS_ANDROID; then
-        echo "  Installing sqlite-vec (Android workaround)..."
+        echo "  Installing native packages via manylinux wheels (Android workaround)..."
         TMPDIR_WHL=$(mktemp -d)
         PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')
         SITE_PACKAGES=$("$VENV_DIR/bin/python3" -c "import site; print(site.getsitepackages()[0])")
 
-        # Download the manylinux aarch64 wheel
-        "$VENV_DIR/bin/pip" download sqlite-vec \
-            --only-binary=:all: \
-            --platform manylinux_2_17_aarch64 \
-            --python-version "$PY_VER" \
-            -d "$TMPDIR_WHL" 2>&1 | tail -1
+        # Packages that need the manylinux wheel workaround on Termux
+        NATIVE_PKGS="sqlite-vec pydantic-core cffi cryptography rpds-py"
 
-        # Wheels are zip files — extract directly into site-packages
-        if ls "$TMPDIR_WHL"/sqlite_vec*.whl &>/dev/null; then
-            unzip -o "$TMPDIR_WHL"/sqlite_vec*.whl -d "$SITE_PACKAGES" >/dev/null
-            echo "  sqlite-vec: installed via manylinux wheel"
-        else
-            echo "  WARNING: Could not download sqlite-vec wheel"
-        fi
+        for pkg in $NATIVE_PKGS; do
+            pkg_under=$(echo "$pkg" | tr '-' '_')
+            echo "  Downloading $pkg..."
+            "$VENV_DIR/bin/pip" download "$pkg" \
+                --only-binary=:all: \
+                --platform manylinux_2_17_aarch64 \
+                --python-version "$PY_VER" \
+                -d "$TMPDIR_WHL" 2>&1 | tail -1
+
+            # Wheels are zip files — extract directly into site-packages
+            if ls "$TMPDIR_WHL"/${pkg_under}*.whl &>/dev/null; then
+                unzip -o "$TMPDIR_WHL"/${pkg_under}*.whl -d "$SITE_PACKAGES" >/dev/null
+                echo "  $pkg: installed via manylinux wheel"
+            else
+                echo "  WARNING: Could not download $pkg wheel"
+            fi
+            # Clean up for next package
+            rm -f "$TMPDIR_WHL"/*.whl
+        done
         rm -rf "$TMPDIR_WHL"
 
-        # Install remaining dependencies (skip sqlite-vec since already installed)
-        "$VENV_DIR/bin/pip" install -e "$RAG_DIR" --no-deps 2>&1 | tail -1
-        "$VENV_DIR/bin/pip" install httpx mcp pyyaml 2>&1 | tail -1
+        # Install the project and remaining pure-Python dependencies
+        # Pre-installed native packages are detected via dist-info and skipped
+        "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1
     else
         "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1
     fi
