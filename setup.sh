@@ -268,48 +268,37 @@ install_with_pip() {
     fi
     "$VENV_DIR/bin/pip" install --upgrade pip 2>&1 | tail -1
 
-    # On Android/Termux, many native-extension packages have no android wheel.
-    # The manylinux aarch64 wheels are binary-compatible, so we download
-    # them and extract into site-packages manually before pip install.
+    # On Android/Termux, pip cannot install native-extension packages normally.
+    # Strategy: use pip to resolve & download ALL deps as manylinux/universal
+    # wheels, then extract them directly into site-packages (bypassing pip's
+    # platform compatibility check entirely).
     if $IS_ANDROID; then
-        echo "  Installing native packages via manylinux wheels (Android workaround)..."
+        echo "  Downloading all dependencies as wheels (Android workaround)..."
         TMPDIR_WHL=$(mktemp -d)
         PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')
         SITE_PACKAGES=$("$VENV_DIR/bin/python3" -c "import site; print(site.getsitepackages()[0])")
 
-        # Packages that need the manylinux wheel workaround on Termux
-        NATIVE_PKGS="sqlite-vec pydantic-core cffi cryptography rpds-py pyyaml"
+        # Download ALL deps in one pass — pip resolves versions consistently.
+        # manylinux wheels for native packages, universal wheels for pure-Python.
+        "$VENV_DIR/bin/pip" download \
+            httpx "mcp>=1.2.0" pyyaml sqlite-vec \
+            --only-binary=:all: \
+            --platform manylinux_2_17_aarch64 \
+            --python-version "$PY_VER" \
+            -d "$TMPDIR_WHL" 2>&1
 
-        for pkg in $NATIVE_PKGS; do
-            pkg_under=$(echo "$pkg" | tr '-' '_')
-            echo "  Downloading $pkg..."
-            "$VENV_DIR/bin/pip" download "$pkg" \
-                --only-binary=:all: \
-                --platform manylinux_2_17_aarch64 \
-                --python-version "$PY_VER" \
-                -d "$TMPDIR_WHL" 2>&1 | tail -1
-
-            # Wheels are zip files — extract directly into site-packages
-            # Use find -iname for case-insensitive match (e.g. PyYAML vs pyyaml)
-            WHL_FILE=$(find "$TMPDIR_WHL" -maxdepth 1 -iname "${pkg_under}*.whl" | head -1)
-            if [ -n "$WHL_FILE" ]; then
-                unzip -o "$WHL_FILE" -d "$SITE_PACKAGES" >/dev/null
-                echo "  $pkg: installed via manylinux wheel"
-            else
-                echo "  WARNING: Could not download $pkg wheel"
-            fi
-            # Clean up for next package
-            rm -f "$TMPDIR_WHL"/*.whl
+        # Extract ALL wheels into site-packages
+        WHL_COUNT=0
+        for whl in "$TMPDIR_WHL"/*.whl; do
+            [ -f "$whl" ] || continue
+            unzip -o "$whl" -d "$SITE_PACKAGES" >/dev/null
+            WHL_COUNT=$((WHL_COUNT + 1))
         done
         rm -rf "$TMPDIR_WHL"
+        echo "  Installed $WHL_COUNT packages via wheel extraction"
 
-        # Install the project without dependency resolution
+        # Install the project itself (no deps — already in site-packages)
         "$VENV_DIR/bin/pip" install --no-deps -e "$RAG_DIR" 2>&1 | tail -1
-
-        # Install remaining dependencies
-        # Native packages are already in site-packages via manylinux wheels,
-        # so pip will see them as satisfied and skip them
-        "$VENV_DIR/bin/pip" install httpx "mcp>=1.2.0" pyyaml 2>&1 | tail -1
     else
         "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1
     fi
