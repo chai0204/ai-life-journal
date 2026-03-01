@@ -142,16 +142,27 @@ install_ollama_binary() {
 }
 
 if $IS_ANDROID; then
-    # Official install script requires root; download binary directly
+    # Termux: use pkg (Termux package manager) first, fall back to direct binary download
     if command -v ollama &>/dev/null; then
         echo "  Ollama: already installed"
         OLLAMA_URL="http://localhost:11434"
     else
-        echo "  Installing Ollama (direct binary download for Termux)..."
-        if install_ollama_binary; then
-            OLLAMA_URL="http://localhost:11434"
-        else
-            echo "  Ollama could not be installed. RAG search will be unavailable."
+        echo "  Installing Ollama for Termux..."
+        if command -v pkg &>/dev/null && pkg install -y ollama 2>&1; then
+            if command -v ollama &>/dev/null; then
+                echo "  Ollama: installed via pkg"
+                OLLAMA_URL="http://localhost:11434"
+            fi
+        fi
+        # Fallback: direct binary download
+        if [ -z "$OLLAMA_URL" ]; then
+            echo "  pkg install failed, trying direct binary download..."
+            if install_ollama_binary; then
+                OLLAMA_URL="http://localhost:11434"
+            else
+                echo "  Ollama could not be installed. RAG search will be unavailable."
+                echo "  TIP: Try manually: pkg install ollama"
+            fi
         fi
     fi
 elif $IS_WSL2; then
