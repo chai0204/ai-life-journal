@@ -7,6 +7,15 @@ import httpx
 from .config import OLLAMA_MODEL, OLLAMA_URL
 
 
+class OllamaConnectionError(Exception):
+    """Raised when Ollama is unreachable."""
+
+    def __init__(self, url: str, cause: Exception | None = None) -> None:
+        self.url = url
+        self.cause = cause
+        super().__init__(f"Cannot connect to Ollama at {url}")
+
+
 class Embedder:
     """Client for generating embeddings via Ollama API."""
 
@@ -34,21 +43,27 @@ class Embedder:
 
     def embed(self, text: str) -> list[float]:
         """Generate embedding for a single text (synchronous)."""
-        resp = self.sync_client.post(
-            f"{self.url}/api/embed",
-            json={"model": self.model, "input": text},
-        )
-        resp.raise_for_status()
+        try:
+            resp = self.sync_client.post(
+                f"{self.url}/api/embed",
+                json={"model": self.model, "input": text},
+            )
+            resp.raise_for_status()
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            raise OllamaConnectionError(self.url, e) from e
         data = resp.json()
         return data["embeddings"][0]
 
     async def aembed(self, text: str) -> list[float]:
         """Generate embedding for a single text (async)."""
-        resp = await self.async_client.post(
-            f"{self.url}/api/embed",
-            json={"model": self.model, "input": text},
-        )
-        resp.raise_for_status()
+        try:
+            resp = await self.async_client.post(
+                f"{self.url}/api/embed",
+                json={"model": self.model, "input": text},
+            )
+            resp.raise_for_status()
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            raise OllamaConnectionError(self.url, e) from e
         data = resp.json()
         return data["embeddings"][0]
 
@@ -57,11 +72,14 @@ class Embedder:
 
         Uses the Ollama batch API which accepts multiple inputs.
         """
-        resp = self.sync_client.post(
-            f"{self.url}/api/embed",
-            json={"model": self.model, "input": texts},
-        )
-        resp.raise_for_status()
+        try:
+            resp = self.sync_client.post(
+                f"{self.url}/api/embed",
+                json={"model": self.model, "input": texts},
+            )
+            resp.raise_for_status()
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            raise OllamaConnectionError(self.url, e) from e
         data = resp.json()
         return data["embeddings"]
 

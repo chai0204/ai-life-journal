@@ -360,3 +360,75 @@ mcp__life-rag__search(
 
 - **自動**: git commit 時に post-commit hook が差分更新を実行する
 - **手動フルリビルド**: `uv --directory ./rag-mcp run life-rag-index --full`
+
+### Ollama 接続エラー時の対処
+
+RAG 検索で「Ollama 接続エラー」が返された場合、AIは以下の手順で **自動修復を試みる**。
+
+#### 自動修復フロー
+
+1. **接続確認**:
+   ```bash
+   curl -sf http://localhost:11434/api/tags && echo "OK" || echo "FAIL"
+   ```
+
+2. **WSL2 の場合は Windows ホストも確認**:
+   ```bash
+   WIN_HOST=$(ip route show default | awk '{print $3}')
+   curl -sf "http://${WIN_HOST}:11434/api/tags" && echo "OK" || echo "FAIL"
+   ```
+
+3. **ローカルの Ollama を起動**（接続できなかった場合）:
+   ```bash
+   # Ollama がインストールされているか確認
+   command -v ollama
+
+   # 起動
+   ollama serve &
+   sleep 3
+
+   # 起動確認
+   curl -sf http://localhost:11434/api/tags
+   ```
+
+4. **bge-m3 モデルの確認**（Ollama は起動しているがモデルがない場合）:
+   ```bash
+   ollama list | grep bge-m3 || ollama pull bge-m3
+   ```
+
+5. **復旧できなかった場合** → オーナーに以下を伝える:
+   - 「Ollama に接続できないため、セマンティック検索が利用できません」
+   - 環境に応じた対処法を提示する（下記参照）
+   - 「検索なしで続行しますか？」と確認する
+
+#### 環境別の対処ガイド（オーナーに提示する内容）
+
+**Linux（ネイティブ）:**
+```bash
+# Ollama 未インストールの場合
+curl -fsSL https://ollama.com/install.sh | sh
+ollama serve &
+ollama pull bge-m3
+```
+
+**WSL2（Windows 側 Ollama を使用）:**
+- Windows 側で Ollama アプリが起動しているか確認（タスクトレイのアイコン）
+- 起動していない場合は Windows のスタートメニューから Ollama を起動
+- 初回の場合は https://ollama.com からインストール
+
+**WSL2（WSL2 内に Ollama をインストール）:**
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama serve &
+ollama pull bge-m3
+```
+
+#### 検索なしでの続行
+
+Ollama が復旧できない場合でも、以下の機能は正常に使える:
+- 日記の作成・追記（`/journal`, `/recall`）
+- ファイルの直接読み書き
+- GitHub Issues の操作
+- `grep` や `glob` による文字列ベースの検索
+
+セマンティック検索が必要な操作（重複検査、`/distill`、分身モード等）のみ影響を受ける。この場合は `grep` ベースのフォールバック検索で代替する。
