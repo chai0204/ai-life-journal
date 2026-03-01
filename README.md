@@ -26,7 +26,7 @@ AIチャットを通じて人生を記録・整理するシステム。[Claude C
 ## セットアップ
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ai-life-journal.git
+git clone https://github.com/chai0204/ai-life-journal
 cd ai-life-journal
 ./setup.sh
 ```
@@ -146,3 +146,4 @@ cd ai-life-journal
 ## ライセンス
 
 MIT
+
