@@ -82,7 +82,7 @@ if $IS_PROOT; then
     if ! command -v node &>/dev/null; then
         echo "  Installing Node.js 22.x..."
         curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh
-        bash /tmp/nodesource_setup.sh 2>/dev/null
+        bash /tmp/nodesource_setup.sh </dev/null 2>/dev/null
         rm -f /tmp/nodesource_setup.sh
         apt install -y nodejs 2>/dev/null
     fi
@@ -135,7 +135,7 @@ if command -v uv &>/dev/null; then
     echo "  uv: already installed ($(uv --version))"
 else
     echo "  Installing uv..."
-    if curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh 2>&1; then
+    if curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh </dev/null 2>&1; then
         export PATH="$HOME/.local/bin:$PATH"
         if command -v uv &>/dev/null; then
             PKG_MANAGER="uv"
@@ -171,7 +171,7 @@ elif command -v ollama &>/dev/null; then
     OLLAMA_URL="http://localhost:11434"
 else
     echo "  Installing Ollama..."
-    if curl -fsSL https://ollama.com/install.sh 2>/dev/null | sh 2>&1; then
+    if curl -fsSL https://ollama.com/install.sh 2>/dev/null | sh </dev/null 2>&1; then
         if command -v ollama &>/dev/null; then
             echo "  Ollama: installed"
             OLLAMA_URL="http://localhost:11434"
@@ -208,7 +208,7 @@ if command -v claude &>/dev/null; then
 else
     if command -v npm &>/dev/null; then
         echo "  Installing via npm..."
-        npm install -g @anthropic-ai/claude-code 2>&1 | tail -5
+        npm install -g @anthropic-ai/claude-code </dev/null 2>&1 | tail -5
         if command -v claude &>/dev/null; then
             echo "  Claude Code: installed"
         else
