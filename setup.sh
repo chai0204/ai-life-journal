@@ -44,13 +44,20 @@ fi
 
 # Platform detection
 IS_WSL2=false
+IS_PROOT=false
 if [ -f /proc/sys/fs/binfmt_misc/WSLInterop ]; then
     IS_WSL2=true
+fi
+# proot-distro: the process is traced by PRoot (TracerPid > 0)
+if [ -f /proc/self/status ] && grep -q "TracerPid:[[:space:]]*[1-9]" /proc/self/status 2>/dev/null; then
+    IS_PROOT=true
 fi
 
 echo "=== ai-life-journal setup ==="
 echo "Repository root: $REPO_ROOT"
-if $IS_WSL2; then
+if $IS_PROOT; then
+    echo "Platform: proot-distro ($(uname -s))"
+elif $IS_WSL2; then
     echo "Platform: WSL2"
 else
     echo "Platform: $(uname -s)"
@@ -123,7 +130,30 @@ echo "[3/7] Checking Ollama..."
 
 OLLAMA_URL="${OLLAMA_URL:-}"
 
-if $IS_WSL2; then
+if $IS_PROOT; then
+    # proot-distro: Ollama should be installed on the Termux host side.
+    # Network namespace is shared, so localhost:11434 reaches the host Ollama.
+    echo "  proot-distro detected. Checking Termux host Ollama..."
+    if curl -sf --connect-timeout 3 "http://localhost:11434/api/tags" &>/dev/null; then
+        OLLAMA_URL="http://localhost:11434"
+        echo "  Ollama found on Termux host: $OLLAMA_URL"
+    elif command -v ollama &>/dev/null; then
+        # Ollama binary exists inside proot (e.g. shared from Termux)
+        OLLAMA_URL="http://localhost:11434"
+        echo "  Ollama binary found (will attempt to start)"
+    else
+        echo "  WARNING: Ollama not reachable at localhost:11434."
+        echo ""
+        echo "  Ollama should be installed and started on the Termux side:"
+        echo "    # Exit proot-distro first, then in Termux:"
+        echo "    pkg install tur-repo"
+        echo "    pkg install ollama"
+        echo "    ollama serve &"
+        echo "    ollama pull bge-m3"
+        echo ""
+        echo "  Then re-run ./setup.sh inside proot-distro."
+    fi
+elif $IS_WSL2; then
     WIN_HOST=$(ip route show default | awk '{print $3}')
     echo "  WSL2 detected. Checking Windows host ($WIN_HOST) for Ollama..."
     if curl -sf "http://${WIN_HOST}:11434/api/tags" &>/dev/null; then
@@ -263,9 +293,12 @@ echo "Setting up embedding model and index..."
 
 if [ -n "$OLLAMA_URL" ] && curl -sf --connect-timeout 3 "$OLLAMA_URL/api/tags" &>/dev/null; then
     echo "  Pulling bge-m3 embedding model (this may take a few minutes on first run)..."
-    if $IS_WSL2 && [ "$OLLAMA_URL" != "http://localhost:11434" ]; then
-        # WSL2 with Windows Ollama: use API to pull
-        echo "  Using Windows Ollama at $OLLAMA_URL"
+    if command -v ollama &>/dev/null && [ "$OLLAMA_URL" = "http://localhost:11434" ] && ! $IS_PROOT; then
+        # Local Ollama binary available: use CLI directly
+        ollama pull bge-m3
+    else
+        # Remote Ollama (WSL2/Windows, proot-distro, or custom URL): use API
+        echo "  Using Ollama API at $OLLAMA_URL"
         curl -sf "$OLLAMA_URL/api/pull" -d '{"name":"bge-m3"}' | while IFS= read -r line; do
             status=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null)
             if [ -n "$status" ]; then
@@ -273,8 +306,6 @@ if [ -n "$OLLAMA_URL" ] && curl -sf --connect-timeout 3 "$OLLAMA_URL/api/tags" &
             fi
         done
         echo ""
-    else
-        ollama pull bge-m3
     fi
 
     # Verify embed API end-to-end (catches runner issues early)
