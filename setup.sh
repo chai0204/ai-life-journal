@@ -486,11 +486,16 @@ if $SETUP_GITHUB; then
             echo "  Repository $GH_USER/$REPO_NAME already exists"
         else
             echo "  Creating private repository: $GH_USER/$REPO_NAME"
-            gh repo create "$REPO_NAME" --private 2>&1 || {
+            # gh repo create may warn about existing 'origin' remote — that's OK,
+            # we handle the remote ourselves below.
+            gh repo create "$REPO_NAME" --private 2>&1 || true
+
+            # Verify the repo was actually created
+            if ! gh repo view "$GH_USER/$REPO_NAME" &>/dev/null 2>&1; then
                 echo "  WARNING: Repository creation failed."
                 echo "  Try manually: gh repo create $REPO_NAME --private"
                 SETUP_GITHUB=false
-            }
+            fi
         fi
 
         if $SETUP_GITHUB; then
