@@ -1,21 +1,36 @@
-"""SQLite + sqlite-vec database operations."""
+"""SQLite database with pure-Python vector similarity search."""
 
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import struct
 from pathlib import Path
-
-import sqlite_vec
 
 from .config import EMBEDDING_DIM, LIFE_RAG_DB_PATH
 from .models import Chunk, SearchResult
 
 
 def _serialize_f32(vec: list[float]) -> bytes:
-    """Serialize a list of floats to a compact binary format for sqlite-vec."""
+    """Serialize a list of floats to a compact binary format."""
     return struct.pack(f"{len(vec)}f", *vec)
+
+
+def _deserialize_f32(data: bytes) -> list[float]:
+    """Deserialize a binary blob back to a list of floats."""
+    n = len(data) // 4
+    return list(struct.unpack(f"{n}f", data))
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Compute cosine similarity between two vectors."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 class Database:
@@ -32,9 +47,6 @@ class Database:
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
-        conn.enable_load_extension(True)
-        sqlite_vec.load(conn)
-        conn.enable_load_extension(False)
         return conn
 
     def initialize(self) -> None:
@@ -54,11 +66,20 @@ class Database:
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_chunks_file_path ON chunks(file_path)
         """)
-        cur.execute(f"""
-            CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
-                embedding float[{EMBEDDING_DIM}]
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS embeddings (
+                chunk_id INTEGER PRIMARY KEY,
+                embedding BLOB NOT NULL,
+                FOREIGN KEY (chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
             )
         """)
+        # Migrate from old vec_chunks virtual table if it exists
+        cur.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='vec_chunks'
+        """)
+        if cur.fetchone():
+            cur.execute("DROP TABLE vec_chunks")
         self.conn.commit()
 
     def insert_chunk(self, chunk: Chunk, embedding: list[float]) -> int:
@@ -80,7 +101,7 @@ class Database:
         )
         chunk_id = cur.lastrowid
         cur.execute(
-            "INSERT INTO vec_chunks (rowid, embedding) VALUES (?, ?)",
+            "INSERT INTO embeddings (chunk_id, embedding) VALUES (?, ?)",
             (chunk_id, _serialize_f32(embedding)),
         )
         self.conn.commit()
@@ -89,13 +110,12 @@ class Database:
     def delete_by_file(self, file_path: str) -> int:
         """Delete all chunks for a given file. Returns number of deleted rows."""
         cur = self.conn.cursor()
-        # Get chunk ids to delete from vec table
         cur.execute("SELECT id FROM chunks WHERE file_path = ?", (file_path,))
         ids = [row[0] for row in cur.fetchall()]
         if not ids:
             return 0
         placeholders = ",".join("?" * len(ids))
-        cur.execute(f"DELETE FROM vec_chunks WHERE rowid IN ({placeholders})", ids)
+        cur.execute(f"DELETE FROM embeddings WHERE chunk_id IN ({placeholders})", ids)
         cur.execute("DELETE FROM chunks WHERE file_path = ?", (file_path,))
         self.conn.commit()
         return len(ids)
@@ -110,58 +130,50 @@ class Database:
         date_until: str | None = None,
         tags: list[str] | None = None,
     ) -> list[SearchResult]:
-        """Two-phase search: vector candidates then metadata filtering."""
-        # Phase 1: Get vector candidates (fetch more than limit to allow filtering)
-        candidate_limit = limit * 10
+        """Search by cosine similarity with optional metadata filtering."""
         cur = self.conn.cursor()
-        cur.execute(
-            """
-            SELECT rowid, distance
-            FROM vec_chunks
-            WHERE embedding MATCH ?
-            ORDER BY distance
-            LIMIT ?
-            """,
-            (_serialize_f32(query_embedding), candidate_limit),
-        )
-        candidates = cur.fetchall()
 
-        if not candidates:
-            return []
+        # Build query with optional filters for pre-filtering
+        where_clauses = []
+        params: list[str] = []
+        if layer:
+            where_clauses.append("c.layer = ?")
+            params.append(layer)
+        if date_from:
+            where_clauses.append("c.date >= ?")
+            params.append(date_from)
+        if date_until:
+            where_clauses.append("c.date <= ?")
+            params.append(date_until)
 
-        # Phase 2: Fetch metadata and filter
-        candidate_ids = [row[0] for row in candidates]
-        distance_map = {row[0]: row[1] for row in candidates}
+        where_sql = ""
+        if where_clauses:
+            where_sql = "WHERE " + " AND ".join(where_clauses)
 
-        placeholders = ",".join("?" * len(candidate_ids))
         cur.execute(
             f"""
-            SELECT id, file_path, layer, heading, date, tags, content
-            FROM chunks
-            WHERE id IN ({placeholders})
+            SELECT c.id, c.file_path, c.layer, c.heading, c.date, c.tags,
+                   c.content, e.embedding
+            FROM chunks c
+            JOIN embeddings e ON e.chunk_id = c.id
+            {where_sql}
             """,
-            candidate_ids,
+            params,
         )
         rows = cur.fetchall()
 
+        # Compute similarity and filter
         results: list[SearchResult] = []
         for row in rows:
-            chunk_id, file_path, row_layer, heading, date, tags_json, content = row
+            chunk_id, file_path, row_layer, heading, date, tags_json, content, emb_blob = row
             row_tags = json.loads(tags_json) if tags_json else []
 
-            # Apply filters
-            if layer and row_layer != layer:
-                continue
-            if date_from and (not date or date < date_from):
-                continue
-            if date_until and (not date or date > date_until):
-                continue
+            # Tag filter (not easily done in SQL with JSON)
             if tags and not any(t in row_tags for t in tags):
                 continue
 
-            distance = distance_map[chunk_id]
-            # Convert distance to similarity score (cosine distance → similarity)
-            score = 1.0 - distance
+            emb = _deserialize_f32(emb_blob)
+            score = _cosine_similarity(query_embedding, emb)
 
             results.append(
                 SearchResult(

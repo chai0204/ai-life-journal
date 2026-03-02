@@ -33,7 +33,7 @@ def test_initialize(tmp_db: Database) -> None:
     cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
     tables = {row[0] for row in cur.fetchall()}
     assert "chunks" in tables
-    assert "vec_chunks" in tables
+    assert "embeddings" in tables
 
 
 def test_insert_and_count(tmp_db: Database) -> None:
