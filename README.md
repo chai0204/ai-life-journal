@@ -108,23 +108,41 @@ ai-life-journal/
 
 ## Termux（Android）でのセットアップ
 
-スマートフォンからも使用可能。Termux で SSH 経由でメインPCに接続して Claude Code を使う構成を推奨。
+スマートフォンからも使用可能。Termux の **proot-distro** を使って Ubuntu 環境内で実行する。
 
-### Termux 直接実行の場合
+### proot-distro を使ったセットアップ
+
+Termux は Android の Bionic libc を使用しており、多くの Python ネイティブ拡張（pydantic-core 等）が動作しない。proot-distro は root 不要で完全な glibc Linux 環境を提供し、すべてが通常の Linux と同様に動作する。
 
 ```bash
-pkg install git python
-# uv と Ollama は setup.sh が自動インストール
-git clone https://github.com/YOUR_USERNAME/ai-life-journal.git
+# Termux で proot-distro をインストール（初回のみ）
+pkg install proot-distro
+proot-distro install ubuntu
+
+# Ubuntu 環境に入る
+proot-distro login ubuntu
+
+# Ubuntu 内で前提条件をインストール
+apt update && apt install -y git python3 python3-pip python3-venv curl
+
+# あとは通常のセットアップ
+git clone https://github.com/chai0204/ai-life-journal
 cd ai-life-journal
 ./setup.sh
 ```
 
-**注意事項:**
-- **Ollama**: Termux では公式サポートなし。リモートの Ollama サーバーに接続する場合は、`setup.sh` 実行前に `export OLLAMA_URL=http://YOUR_SERVER:11434` を設定
-- **sqlite-vec**: aarch64-linux のプリビルドホイールあり（動作確認が必要な場合あり）
+### 日常的な使い方
 
-### SSH 経由の場合（推奨）
+```bash
+# Termux を開いたら
+proot-distro login ubuntu
+
+# Ubuntu 内で Claude Code を起動
+cd ai-life-journal
+claude
+```
+
+### SSH 経由の場合（代替）
 
 メインPCで Ollama と Claude Code を動かし、Termux からは SSH で接続する構成。パフォーマンスと安定性に優れる。
 
