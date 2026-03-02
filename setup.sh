@@ -256,8 +256,8 @@ if [ -n "$OLLAMA_URL" ]; then
         if command -v ollama &>/dev/null; then
             echo "  Starting Ollama..."
             ollama serve &>/dev/null &
-            # Wait up to 10 seconds for startup
-            for i in $(seq 1 10); do
+            # Wait up to 15 seconds for startup
+            for i in $(seq 1 15); do
                 if curl -sf --connect-timeout 1 "$OLLAMA_URL/api/tags" &>/dev/null; then
                     echo "  Ollama started successfully"
                     break
@@ -269,6 +269,25 @@ if [ -n "$OLLAMA_URL" ]; then
             fi
         else
             echo "  WARNING: Cannot reach Ollama at $OLLAMA_URL"
+        fi
+    fi
+
+    # Ensure Ollama key exists (required for ollama pull).
+    # ollama serve generates the key on first startup, but it may take a moment.
+    OLLAMA_KEY="$HOME/.ollama/id_ed25519"
+    if [ ! -f "$OLLAMA_KEY" ]; then
+        echo "  Waiting for Ollama key generation..."
+        for i in $(seq 1 10); do
+            [ -f "$OLLAMA_KEY" ] && break
+            sleep 1
+        done
+        if [ ! -f "$OLLAMA_KEY" ]; then
+            echo "  Key not found. Triggering generation..."
+            # Briefly start ollama serve to generate the key (stops if port already in use)
+            ollama serve &>/dev/null &
+            OLLAMA_KEYGEN_PID=$!
+            sleep 3
+            kill "$OLLAMA_KEYGEN_PID" 2>/dev/null || true
         fi
     fi
 else
