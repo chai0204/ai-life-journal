@@ -476,29 +476,37 @@ if $SETUP_GITHUB; then
     if gh auth status &>/dev/null 2>&1; then
         GH_USER=$(gh api user -q .login 2>/dev/null)
         REPO_NAME="ai-life-journal"
+        NEW_ORIGIN="https://github.com/$GH_USER/$REPO_NAME.git"
+        CURRENT_BRANCH=$(git branch --show-current)
 
         echo ""
-        echo "  Creating private repository: $GH_USER/$REPO_NAME"
 
-        # Check if repo already exists
+        # Create repo on GitHub if it doesn't exist
         if gh repo view "$GH_USER/$REPO_NAME" &>/dev/null 2>&1; then
-            echo "  Repository already exists. Updating remote..."
-            git remote set-url origin "https://github.com/$GH_USER/$REPO_NAME.git" 2>/dev/null \
-                || git remote add origin "https://github.com/$GH_USER/$REPO_NAME.git" 2>/dev/null
+            echo "  Repository $GH_USER/$REPO_NAME already exists"
         else
-            # Create new private repo
-            gh repo create "$REPO_NAME" --private --source=. --remote=origin --push 2>&1 \
-                && echo "  Repository created and pushed!" \
-                || {
-                    echo "  WARNING: Repository creation failed."
-                    echo "  Try manually: gh repo create $REPO_NAME --private --source=. --push"
-                }
+            echo "  Creating private repository: $GH_USER/$REPO_NAME"
+            gh repo create "$REPO_NAME" --private 2>&1 || {
+                echo "  WARNING: Repository creation failed."
+                echo "  Try manually: gh repo create $REPO_NAME --private"
+                SETUP_GITHUB=false
+            }
         fi
 
-        # Ensure latest is pushed
-        if git remote get-url origin &>/dev/null 2>&1; then
-            git push -u origin "$(git branch --show-current)" 2>/dev/null && \
-                echo "  Pushed to: https://github.com/$GH_USER/$REPO_NAME"
+        if $SETUP_GITHUB; then
+            # Switch origin from template repo to user's repo
+            echo "  Updating remote origin → $NEW_ORIGIN"
+            git remote set-url origin "$NEW_ORIGIN" 2>/dev/null \
+                || git remote add origin "$NEW_ORIGIN" 2>/dev/null
+
+            # Push all content
+            echo "  Pushing..."
+            if git push -u origin "$CURRENT_BRANCH" 2>&1; then
+                echo "  Done! https://github.com/$GH_USER/$REPO_NAME"
+            else
+                echo "  WARNING: Push failed."
+                echo "  Try manually: git push -u origin $CURRENT_BRANCH"
+            fi
         fi
     else
         echo "  WARNING: GitHub authentication failed."
