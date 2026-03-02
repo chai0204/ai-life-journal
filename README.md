@@ -123,7 +123,7 @@ proot-distro install ubuntu
 proot-distro login ubuntu
 
 # Ubuntu 内で前提条件をインストール
-apt update && apt install -y git python3 python3-pip python3-venv curl
+apt update && apt install -y git python3 curl
 
 # あとは通常のセットアップ
 git clone https://github.com/chai0204/ai-life-journal

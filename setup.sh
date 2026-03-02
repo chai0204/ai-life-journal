@@ -32,7 +32,7 @@ if [ "$(uname -o 2>/dev/null)" = "Android" ]; then
     echo "  proot-distro login ubuntu"
     echo ""
     echo "  # Inside Ubuntu: install prerequisites"
-    echo "  apt update && apt install -y git python3 python3-pip python3-venv curl"
+    echo "  apt update && apt install -y git python3 curl"
     echo ""
     echo "  # Then run setup normally"
     echo "  git clone https://github.com/chai0204/ai-life-journal"
