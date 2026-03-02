@@ -8,6 +8,13 @@ RAG_DIR="$REPO_ROOT/rag-mcp"
 VENV_DIR="$RAG_DIR/.venv"
 TARGET_DIRS="journal/|knowledge/|thoughts/|profile/|works/|references/"
 
+# Ensure Ollama runner symlink (see setup.sh for details)
+if command -v ollama &>/dev/null && ! command -v serve &>/dev/null; then
+    ollama_bin="$(command -v ollama)"
+    ln -sf "$ollama_bin" /usr/local/bin/serve 2>/dev/null || \
+        (mkdir -p "$HOME/.local/bin" 2>/dev/null && ln -sf "$ollama_bin" "$HOME/.local/bin/serve" 2>/dev/null && export PATH="$HOME/.local/bin:$PATH")
+fi
+
 # Auto-detect Ollama URL on WSL2
 if [ -f /proc/sys/fs/binfmt_misc/WSLInterop ]; then
     WIN_HOST=$(ip route show default | awk '{print $3}')

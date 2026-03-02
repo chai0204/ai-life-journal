@@ -157,12 +157,35 @@ else
     fi
 fi
 
-# ── 4. Start Ollama service ──
+# ── 4. Ensure Ollama runner & start service ──
 
 echo ""
 echo "[4/7] Checking Ollama service..."
 
+# Ollama 0.17+ spawns a subprocess called 'serve' for model inference.
+# In some environments (proot-distro, containers), this binary is not in PATH.
+# Fix: create a symlink 'serve' -> 'ollama' so the runner can find itself.
+ensure_ollama_runner() {
+    command -v serve &>/dev/null && return 0
+    local ollama_bin
+    ollama_bin="$(command -v ollama 2>/dev/null)" || return 1
+    if ln -sf "$ollama_bin" /usr/local/bin/serve 2>/dev/null; then
+        echo "  Created runner symlink: /usr/local/bin/serve -> $ollama_bin"
+    elif mkdir -p "$HOME/.local/bin" 2>/dev/null && ln -sf "$ollama_bin" "$HOME/.local/bin/serve" 2>/dev/null; then
+        export PATH="$HOME/.local/bin:$PATH"
+        echo "  Created runner symlink: $HOME/.local/bin/serve -> $ollama_bin"
+    else
+        echo "  WARNING: Could not create 'serve' symlink. Ollama model runner may fail."
+        return 1
+    fi
+}
+
 if [ -n "$OLLAMA_URL" ]; then
+    # Ensure runner symlink before starting
+    if command -v ollama &>/dev/null; then
+        ensure_ollama_runner
+    fi
+
     if curl -sf --connect-timeout 3 "$OLLAMA_URL/api/tags" &>/dev/null; then
         echo "  Ollama is running at $OLLAMA_URL"
     else
@@ -254,12 +277,16 @@ if [ -n "$OLLAMA_URL" ] && curl -sf --connect-timeout 3 "$OLLAMA_URL/api/tags" &
         ollama pull bge-m3
     fi
 
-    # Verify Ollama connectivity
-    echo "  Verifying Ollama connection..."
-    if curl -sf "$OLLAMA_URL/api/tags" &>/dev/null; then
-        echo "  Ollama connection OK"
+    # Verify embed API end-to-end (catches runner issues early)
+    echo "  Verifying embedding API..."
+    EMBED_RESULT=$(curl -sf --max-time 30 "$OLLAMA_URL/api/embed" \
+        -d '{"model":"bge-m3","input":"test"}' 2>&1)
+    if echo "$EMBED_RESULT" | grep -q '"embeddings"'; then
+        echo "  Embedding API OK"
     else
-        echo "  WARNING: Cannot reach Ollama at $OLLAMA_URL"
+        echo "  WARNING: Embedding API test failed."
+        echo "  Response: $EMBED_RESULT"
+        echo "  RAG semantic search may not work until this is resolved."
     fi
 
     # Build initial index

@@ -30,6 +30,26 @@ if [ -z "${OLLAMA_URL:-}" ]; then
     fi
 fi
 
+# ── Ensure Ollama runner symlink ──
+# Ollama 0.17+ spawns a subprocess called 'serve' for model inference.
+# In some environments (proot-distro, containers), this binary is not in PATH.
+ensure_ollama_runner() {
+    command -v serve &>/dev/null && return 0
+    local ollama_bin
+    ollama_bin="$(command -v ollama 2>/dev/null)" || return 1
+    if ln -sf "$ollama_bin" /usr/local/bin/serve 2>/dev/null; then
+        return 0
+    elif mkdir -p "$HOME/.local/bin" 2>/dev/null && ln -sf "$ollama_bin" "$HOME/.local/bin/serve" 2>/dev/null; then
+        export PATH="$HOME/.local/bin:$PATH"
+        return 0
+    fi
+    return 1
+}
+
+if command -v ollama &>/dev/null; then
+    ensure_ollama_runner
+fi
+
 # ── Ensure Ollama is running ──
 
 ensure_ollama() {
