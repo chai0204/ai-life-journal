@@ -21,10 +21,11 @@ AIチャットを通じて人生を記録・整理するシステム。[Claude C
 
 #### 前提条件
 
-| ソフトウェア | 備考 |
-|---|---|
-| **Git** | `apt install git` / `brew install git` 等 |
-| **curl** | `apt install curl` 等（macOS は標準搭載） |
+| ソフトウェア | 必須 | 備考 |
+|---|---|---|
+| **Git** | 必須 | `apt install git` / `brew install git` 等 |
+| **curl** | 必須 | `apt install curl` 等（macOS は標準搭載） |
+| **GitHub アカウント** | 推奨 | ブラウザから記録を閲覧・バックアップするために必要。[無料作成](https://github.com/signup) |
 
 > **注意**: Python, Node.js, Ollama, Claude Code などは `setup.sh` が自動でインストールします。
 
@@ -52,6 +53,7 @@ claude
 7. Python 依存関係のインストール
 8. 埋め込みモデル（bge-m3, 約670MB）のダウンロード
 9. 初回 RAG インデックスの構築
+10. GitHub 連携（任意）— ブラウザでの閲覧・バックアップ用
 
 ---
 
@@ -73,6 +75,12 @@ claude
 ```
 
 すべてが Ubuntu 環境内で完結するため、セットアップと運用がシンプル。
+
+#### 事前準備（推奨）
+
+- **GitHub アカウント**: ブラウザから記録を閲覧・バックアップするために必要。[無料作成](https://github.com/signup)
+  - セットアップの最後にブラウザ認証で接続できます（`setup.sh` が案内します）
+  - なくても動作しますが、記録の閲覧がターミナル内に限定されます
 
 #### Step 1: Termux をインストール
 

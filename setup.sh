@@ -397,10 +397,111 @@ else
     fi
 fi
 
+# ── 10. GitHub integration (optional) ──
+
+echo ""
+echo "=== Core setup complete! ==="
+echo ""
+
+# Ask user about GitHub integration
+SETUP_GITHUB=false
+echo "GitHub に接続しますか？（任意）"
+echo "ブラウザから記録を閲覧・バックアップできるようになります。"
+echo "GitHub アカウントが必要です（https://github.com/signup）"
+echo ""
+printf "[y/N]: "
+read -r GITHUB_ANSWER </dev/tty || GITHUB_ANSWER=""
+case "$GITHUB_ANSWER" in
+    [yY]|[yY][eE][sS]) SETUP_GITHUB=true ;;
+esac
+
+if $SETUP_GITHUB; then
+    echo ""
+    echo "[10] Connecting to GitHub..."
+
+    # Install gh CLI if needed
+    if ! command -v gh &>/dev/null; then
+        echo "  Installing GitHub CLI..."
+        if $IS_PROOT || command -v apt &>/dev/null; then
+            # Debian/Ubuntu: use GitHub's official repo
+            (
+                apt install -y -qq software-properties-common 2>/dev/null || true
+                curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+                    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+                    > /etc/apt/sources.list.d/github-cli.list
+                apt update -qq 2>/dev/null
+                apt install -y -qq gh 2>/dev/null
+            )
+        elif [ "$(uname -s)" = "Darwin" ] && command -v brew &>/dev/null; then
+            brew install gh
+        fi
+
+        if ! command -v gh &>/dev/null; then
+            echo "  WARNING: GitHub CLI installation failed."
+            echo "  Install manually: https://cli.github.com/"
+            echo "  Then run:"
+            echo "    gh auth login --web"
+            echo "    gh repo create ai-life-journal --private --source=. --push"
+            SETUP_GITHUB=false
+        else
+            echo "  GitHub CLI: installed"
+        fi
+    else
+        echo "  GitHub CLI: already installed"
+    fi
+fi
+
+if $SETUP_GITHUB; then
+    # Authenticate
+    if ! gh auth status &>/dev/null 2>&1; then
+        echo ""
+        echo "  ブラウザで GitHub にログインします。"
+        echo "  表示される URL を開き、コードを入力してください。"
+        echo ""
+        gh auth login --web --git-protocol https < /dev/tty
+    else
+        echo "  GitHub: already authenticated"
+    fi
+
+    # Create private repo and push
+    if gh auth status &>/dev/null 2>&1; then
+        GH_USER=$(gh api user -q .login 2>/dev/null)
+        REPO_NAME="ai-life-journal"
+
+        echo ""
+        echo "  Creating private repository: $GH_USER/$REPO_NAME"
+
+        # Check if repo already exists
+        if gh repo view "$GH_USER/$REPO_NAME" &>/dev/null 2>&1; then
+            echo "  Repository already exists. Updating remote..."
+            git remote set-url origin "https://github.com/$GH_USER/$REPO_NAME.git" 2>/dev/null \
+                || git remote add origin "https://github.com/$GH_USER/$REPO_NAME.git" 2>/dev/null
+        else
+            # Create new private repo
+            gh repo create "$REPO_NAME" --private --source=. --remote=origin --push 2>&1 \
+                && echo "  Repository created and pushed!" \
+                || {
+                    echo "  WARNING: Repository creation failed."
+                    echo "  Try manually: gh repo create $REPO_NAME --private --source=. --push"
+                }
+        fi
+
+        # Ensure latest is pushed
+        if git remote get-url origin &>/dev/null 2>&1; then
+            git push -u origin "$(git branch --show-current)" 2>/dev/null && \
+                echo "  Pushed to: https://github.com/$GH_USER/$REPO_NAME"
+        fi
+    else
+        echo "  WARNING: GitHub authentication failed."
+        echo "  Try manually: gh auth login --web"
+    fi
+fi
+
 # ── Done ──
 
 echo ""
-echo "=== Setup complete! ==="
+echo "=== All done! ==="
 echo ""
 echo "Next steps:"
 echo "  1. Fill in profile/about.md with your information"
@@ -417,4 +518,10 @@ echo "  /recall    - AI-guided daily reflection"
 echo "  /record    - Save conversation to journal + knowledge"
 echo "  /distill   - Extract knowledge from journals"
 echo "  /status    - View progress summary"
+if ! $SETUP_GITHUB; then
+    echo ""
+    echo "GitHub 連携を後から設定する場合:"
+    echo "  gh auth login --web"
+    echo "  gh repo create ai-life-journal --private --source=. --push"
+fi
 echo ""
