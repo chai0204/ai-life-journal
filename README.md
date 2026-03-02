@@ -1,6 +1,6 @@
 # ai-life-journal
 
-AIチャットを通じて人生を記録・整理するシステム。[Claude Code](https://docs.anthropic.com/en/docs/claude-code)と会話するだけで、日記・知識・思考が自動的に構造化される。
+AIチャットを通じて人生を記録・整理するシステム。AIと会話するだけで、日記・知識・思考が自動的に構造化される。なお、chai0204はclaude codeで利用しているが、gemini CLI, codex CLIでも同様に利用できると想定される。
 
 ## コンセプト
 
@@ -18,6 +18,7 @@ AIチャットを通じて人生を記録・整理するシステム。[Claude C
 ## セットアップ
 
 ### PC / VPS（Linux, macOS, WSL2）
+> 現状Termuxのみで動作確認をしており、こちらでの確認はまだしていません。
 
 #### 前提条件
 
@@ -84,18 +85,11 @@ claude
 
 #### Step 1: Termux をインストール
 
-1. スマートフォンに [F-Droid](https://f-droid.org/) をインストールする
-   - F-Droid は Android 用のオープンソースアプリストア
-   - ブラウザで https://f-droid.org/ を開き、APK をダウンロードしてインストール
-   - 「提供元不明のアプリ」の許可が必要（設定で有効にする）
-2. F-Droid から **Termux** を検索してインストールする
-   - Google Play 版の Termux は古く、正常に動作しないため **必ず F-Droid 版を使う**
-
-> **注意**: Google Play 版の Termux は更新が停止しており、多くの機能が壊れています。必ず F-Droid 版を使用してください。
+1. スマートフォンに termuxをインストールします。f-droidのほうが望ましいですが、google play storeからinstallしたものでも正常に動作すると思われます。
 
 #### Step 2: Ubuntu 環境を構築
 
-Termux アプリを開いて、以下を実行する。
+Termux アプリを開いて、以下を1行ずつ実行する（#はコメントなので入力しない）。
 
 ```bash
 # パッケージを更新
@@ -114,6 +108,9 @@ proot-distro install ubuntu
 # Ubuntu 環境に入る
 proot-distro login ubuntu
 
+# Ubuntu 環境に入ったか確認する `/root/ai-life-journal` と出力があれば成功
+pwd
+
 # ===== ここから先は Ubuntu 内 =====
 
 # 最低限のパッケージをインストール（git と curl のみ）
@@ -121,6 +118,8 @@ apt update && apt install -y git curl ca-certificates
 
 # リポジトリをクローン
 git clone https://github.com/chai0204/ai-life-journal
+
+# リポジトリの移動
 cd ai-life-journal
 
 # セットアップ（Python, Node.js, Ollama, Claude Code など全部入る）
@@ -142,6 +141,8 @@ claude
 ```
 
 > **ヒント**: Termux の通知バーで「Acquire wakelock」をタップすると、バックグラウンドでの強制終了を防げます。
+> **ヒント**: セッションが切れていなければそのセッションをまた開いても捜査してもOK
+> **ヒント**: Termux での文字入力やセッションの移動、文字入力の仕様などについて調べておくとなおよいです。
 
 ---
 
@@ -279,3 +280,4 @@ ollama serve &
 ## ライセンス
 
 MIT
+
