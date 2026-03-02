@@ -24,59 +24,55 @@ AIチャットを通じて人生を記録・整理するシステム。[Claude C
 | ソフトウェア | 備考 |
 |---|---|
 | **Git** | `apt install git` / `brew install git` 等 |
-| **Python 3.12+** | `apt install python3` / `brew install python` 等 |
 | **curl** | `apt install curl` 等（macOS は標準搭載） |
-| **Claude Code** | 下記の手順でインストール |
+
+> **注意**: Python, Node.js, Ollama, Claude Code などは `setup.sh` が自動でインストールします。
 
 #### 手順
 
 ```bash
-# 1. Claude Code をインストール（未インストールの場合）
-curl -fsSL https://claude.ai/install.sh | bash
-
-# 2. リポジトリをクローン
+# 1. リポジトリをクローン
 git clone https://github.com/chai0204/ai-life-journal
 cd ai-life-journal
 
-# 3. セットアップ（Ollama, Python依存, RAGインデックスなどを一括構築）
+# 2. セットアップ（すべての依存関係を一括インストール）
 ./setup.sh
+
+# 3. Claude Code を起動
+claude
 ```
 
 `setup.sh` が以下を自動で行います:
-1. uv（Pythonパッケージマネージャ）のインストール
-2. Ollama のインストール・起動
-3. `.mcp.json` の生成（Claude Code がRAGサーバーを認識するための設定）
-4. Git post-commit hook のインストール（コミット時にRAGインデックスを自動更新）
-5. Python 依存関係のインストール
-6. 埋め込みモデル（bge-m3, 約670MB）のダウンロード
-7. 初回 RAG インデックスの構築
+1. システムパッケージのチェック（Python 3.12+, Node.js）
+2. uv（Python パッケージマネージャ）のインストール
+3. Ollama のインストール・起動
+4. Claude Code のインストール
+5. `.mcp.json` の生成（RAG サーバー設定）
+6. Git post-commit hook のインストール
+7. Python 依存関係のインストール
+8. 埋め込みモデル（bge-m3, 約670MB）のダウンロード
+9. 初回 RAG インデックスの構築
 
 ---
 
 ### スマートフォン（Android + Termux）
 
-スマートフォンだけで使える構成。Termux アプリ内に Ubuntu 仮想環境を構築して実行する。
+スマートフォンだけで使える構成。Termux 内の Ubuntu 仮想環境ですべてが動作する。
 
 #### 全体の構成
 
 ```
 ┌──────────────────────────────────────────┐
-│  Termux（ホスト側）                       │
-│  ├── Ollama（pkg install でインストール）  │
-│  └── ollama serve（ここで起動）           │
-│       ↓ localhost:11434                   │
-├──────────────────────────────────────────┤
-│  proot-distro Ubuntu（ゲスト側）          │
-│  ├── Claude Code                         │
-│  ├── ai-life-journal                     │
-│  └── RAG MCP サーバー                    │
-│       → localhost:11434 で Ollama に接続  │
+│  Termux                                  │
+│  └── proot-distro Ubuntu                 │
+│      ├── Ollama + bge-m3                 │
+│      ├── Claude Code                     │
+│      ├── ai-life-journal                 │
+│      └── RAG MCP サーバー                │
 └──────────────────────────────────────────┘
 ```
 
-- **Ollama** は Termux 側で動かす（パフォーマンスが良い）
-- **Claude Code と ai-life-journal** は Ubuntu 側で動かす（glibc 互換性のため）
-- 両者は `localhost` で通信できる（ネットワークを共有しているため）
+すべてが Ubuntu 環境内で完結するため、セットアップと運用がシンプル。
 
 #### Step 1: Termux をインストール
 
@@ -89,7 +85,7 @@ cd ai-life-journal
 
 > **注意**: Google Play 版の Termux は更新が停止しており、多くの機能が壊れています。必ず F-Droid 版を使用してください。
 
-#### Step 2: Termux で Ollama をセットアップ
+#### Step 2: Ubuntu 環境を構築
 
 Termux アプリを開いて、以下を実行する。
 
@@ -97,26 +93,14 @@ Termux アプリを開いて、以下を実行する。
 # パッケージを更新
 pkg update && pkg upgrade
 
-# Ollama をインストール
-pkg install tur-repo
-pkg install ollama
-
-# 埋め込みモデルをダウンロード（約670MB、初回のみ）
-ollama serve &
-ollama pull bge-m3
-```
-
-#### Step 3: Ubuntu 環境を構築
-
-引き続き Termux 内で以下を実行する。
-
-```bash
-# proot-distro をインストール（Ubuntu 仮想環境）
+# proot-distro をインストール
 pkg install proot-distro
+
+# Ubuntu をインストール
 proot-distro install ubuntu
 ```
 
-#### Step 4: Ubuntu 内でセットアップ
+#### Step 3: Ubuntu 内でセットアップ
 
 ```bash
 # Ubuntu 環境に入る
@@ -124,34 +108,28 @@ proot-distro login ubuntu
 
 # ===== ここから先は Ubuntu 内 =====
 
-# 前提パッケージをインストール
-apt update && apt install -y git python3 curl ca-certificates
-
-# Claude Code をインストール
-curl -fsSL https://claude.ai/install.sh | bash
-export PATH="$HOME/.local/bin:$PATH"
+# 最低限のパッケージをインストール（git と curl のみ）
+apt update && apt install -y git curl ca-certificates
 
 # リポジトリをクローン
 git clone https://github.com/chai0204/ai-life-journal
 cd ai-life-journal
 
-# セットアップ（Ollama は Termux 側で起動済みなので自動検出される）
+# セットアップ（Python, Node.js, Ollama, Claude Code など全部入る）
 ./setup.sh
 ```
 
-> **ポイント**: `setup.sh` は proot-distro 環境を自動検出し、Termux 側の Ollama（localhost:11434）に接続します。Ollama のインストールは Termux 側で済んでいるためスキップされます。
+> **ポイント**: `setup.sh` が Python, Node.js, Ollama, Claude Code, RAG サーバーなど必要なものをすべて自動でインストールします。事前に入れるのは git と curl だけで OK です。
 
 #### 日常的な使い方（毎回の起動手順）
 
 ```bash
-# 1. Termux を開いて Ollama を起動
-ollama serve &
-
-# 2. Ubuntu 環境に入る
+# 1. Termux を開いて Ubuntu に入る
 proot-distro login ubuntu
 
-# 3. Claude Code を起動
+# 2. Ollama を起動して Claude Code を開始
 cd ai-life-journal
+ollama serve &
 claude
 ```
 
@@ -241,15 +219,15 @@ ai-life-journal/
 
 ## トラブルシューティング
 
-### Ollama に接続できない（proot-distro）
+### Ollama が起動しない
 
 ```bash
-# Ubuntu 側から接続テスト
-curl http://localhost:11434/api/tags
-
-# 失敗する場合 → Termux 側で Ollama が起動しているか確認
-# Termux に戻って:
+# 手動で起動
 ollama serve &
+
+# ポートが使用中の場合
+# → 既に起動しているので問題なし
+# error: listen tcp 127.0.0.1:11434: bind: address already in use
 ```
 
 ### Embedding API が 500 エラーを返す
@@ -264,7 +242,15 @@ ln -sf "$(which ollama)" /usr/local/bin/serve
 
 ```bash
 # Ollama が起動していることを確認してから再実行
+ollama serve &
 ./setup.sh
+```
+
+### proot-distro で「cpu doesn't support 32-bit instructions」警告
+
+```bash
+# これは警告であり、インストール自体は正常に完了します
+# 64-bit アプリケーションは問題なく動作します
 ```
 
 ## カスタマイズ

@@ -3,9 +3,8 @@ set -euo pipefail
 
 # ──────────────────────────────────────────────
 # ai-life-journal setup script
-# One-command setup: prerequisites, RAG server, git hooks
-# Supports: Linux, macOS, WSL2
-# Android: use proot-distro (see README.md)
+# One-command setup: all dependencies, RAG server, git hooks
+# Supports: Linux, macOS, WSL2, proot-distro (Android)
 # ──────────────────────────────────────────────
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -31,10 +30,10 @@ if [ "$(uname -o 2>/dev/null)" = "Android" ]; then
     echo "  # Enter Ubuntu environment"
     echo "  proot-distro login ubuntu"
     echo ""
-    echo "  # Inside Ubuntu: install prerequisites"
-    echo "  apt update && apt install -y git python3 curl"
+    echo "  # Inside Ubuntu: install minimum prerequisites"
+    echo "  apt update && apt install -y git curl ca-certificates"
     echo ""
-    echo "  # Then run setup normally"
+    echo "  # Clone and run setup"
     echo "  git clone https://github.com/chai0204/ai-life-journal"
     echo "  cd ai-life-journal"
     echo "  ./setup.sh"
@@ -64,42 +63,78 @@ else
 fi
 echo ""
 
-# ── 1. Check prerequisites ──
+# ── 1. Install system packages ──
 
-echo "[1/7] Checking prerequisites..."
+echo "[1/9] Checking system packages..."
 
-# git
-if ! command -v git &>/dev/null; then
-    echo "ERROR: git is not installed. Please install git first."
-    exit 1
-fi
-echo "  git: $(git --version)"
+if $IS_PROOT; then
+    # proot-distro (Ubuntu): auto-install all system dependencies
+    echo "  Updating package list..."
+    apt update -qq 2>/dev/null
 
-# python 3.12+
-if command -v python3 &>/dev/null; then
-    PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
-    PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
-    if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 12 ]; }; then
-        echo "ERROR: Python 3.12+ is required (found $PY_VERSION)"
+    # Python 3
+    if ! command -v python3 &>/dev/null; then
+        echo "  Installing Python 3..."
+        apt install -y python3 python3-venv 2>/dev/null
+    fi
+
+    # Node.js (for Claude Code)
+    if ! command -v node &>/dev/null; then
+        echo "  Installing Node.js 22.x..."
+        curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh
+        bash /tmp/nodesource_setup.sh 2>/dev/null
+        rm -f /tmp/nodesource_setup.sh
+        apt install -y nodejs 2>/dev/null
+    fi
+
+    echo "  System packages: OK"
+else
+    # Other platforms: check prerequisites and report missing
+    MISSING=""
+    if ! command -v python3 &>/dev/null; then
+        MISSING="${MISSING} python3"
+    fi
+    if ! command -v node &>/dev/null; then
+        MISSING="${MISSING} node"
+    fi
+
+    if [ -n "$MISSING" ]; then
+        echo "  Missing:${MISSING}"
+        if [ "$(uname -s)" = "Darwin" ]; then
+            echo "  Install with: brew install python node"
+        elif command -v apt &>/dev/null; then
+            echo "  Install with: sudo apt install -y python3 nodejs"
+        fi
+        echo ""
+        echo "  Please install the missing packages and re-run ./setup.sh"
         exit 1
     fi
-    echo "  python3: $PY_VERSION"
-else
-    echo "ERROR: python3 is not installed. Please install Python 3.12+."
-    exit 1
+    echo "  All prerequisites found"
 fi
 
-# ── 2. Install uv (with pip fallback) ──
+# Version checks
+echo "  git: $(git --version)"
+
+PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
+PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
+if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 12 ]; }; then
+    echo "  ERROR: Python 3.12+ required (found $PY_VERSION)"
+    exit 1
+fi
+echo "  python3: $PY_VERSION"
+echo "  node: $(node --version)"
+
+# ── 2. Install uv (Python package manager) ──
 
 echo ""
-echo "[2/7] Setting up Python package manager..."
+echo "[2/9] Setting up Python package manager..."
 
 if command -v uv &>/dev/null; then
     PKG_MANAGER="uv"
     echo "  uv: already installed ($(uv --version))"
 else
-    echo "  uv not found. Attempting to install..."
+    echo "  Installing uv..."
     if curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh 2>&1; then
         export PATH="$HOME/.local/bin:$PATH"
         if command -v uv &>/dev/null; then
@@ -109,8 +144,7 @@ else
     fi
 
     if [ -z "$PKG_MANAGER" ]; then
-        echo "  uv installation not available on this platform."
-        echo "  Falling back to pip + venv..."
+        echo "  uv installation failed. Falling back to pip..."
         if python3 -m pip --version &>/dev/null; then
             PKG_MANAGER="pip"
             echo "  pip: $(python3 -m pip --version)"
@@ -126,71 +160,71 @@ echo "  Using: $PKG_MANAGER"
 # ── 3. Install Ollama ──
 
 echo ""
-echo "[3/7] Checking Ollama..."
+echo "[3/9] Installing Ollama..."
 
 OLLAMA_URL="${OLLAMA_URL:-}"
 
-if $IS_PROOT; then
-    # proot-distro: Ollama should be installed on the Termux host side.
-    # Network namespace is shared, so localhost:11434 reaches the host Ollama.
-    echo "  proot-distro detected. Checking Termux host Ollama..."
-    if curl -sf --connect-timeout 3 "http://localhost:11434/api/tags" &>/dev/null; then
-        OLLAMA_URL="http://localhost:11434"
-        echo "  Ollama found on Termux host: $OLLAMA_URL"
-    elif command -v ollama &>/dev/null; then
-        # Ollama binary exists inside proot (e.g. shared from Termux)
-        OLLAMA_URL="http://localhost:11434"
-        echo "  Ollama binary found (will attempt to start)"
-    else
-        echo "  WARNING: Ollama not reachable at localhost:11434."
-        echo ""
-        echo "  Ollama should be installed and started on the Termux side:"
-        echo "    # Exit proot-distro first, then in Termux:"
-        echo "    pkg install tur-repo"
-        echo "    pkg install ollama"
-        echo "    ollama serve &"
-        echo "    ollama pull bge-m3"
-        echo ""
-        echo "  Then re-run ./setup.sh inside proot-distro."
-    fi
-elif $IS_WSL2; then
-    WIN_HOST=$(ip route show default | awk '{print $3}')
-    echo "  WSL2 detected. Checking Windows host ($WIN_HOST) for Ollama..."
-    if curl -sf "http://${WIN_HOST}:11434/api/tags" &>/dev/null; then
-        OLLAMA_URL="http://${WIN_HOST}:11434"
-        echo "  Ollama found on Windows host: $OLLAMA_URL"
-    else
-        echo "  Ollama not found on Windows host."
-        echo "  TIP: Install Ollama on Windows (https://ollama.com) and restart setup."
-        echo "  Alternatively, install Ollama in WSL2 directly."
-    fi
+if [ -n "$OLLAMA_URL" ]; then
+    echo "  OLLAMA_URL is set: $OLLAMA_URL"
+elif command -v ollama &>/dev/null; then
+    echo "  Ollama: already installed"
+    OLLAMA_URL="http://localhost:11434"
 else
-    # Linux / macOS
-    if [ -z "$OLLAMA_URL" ]; then
+    echo "  Installing Ollama..."
+    if curl -fsSL https://ollama.com/install.sh 2>/dev/null | sh 2>&1; then
         if command -v ollama &>/dev/null; then
-            echo "  Ollama: already installed"
+            echo "  Ollama: installed"
             OLLAMA_URL="http://localhost:11434"
+        fi
+    fi
+
+    if [ -z "$OLLAMA_URL" ]; then
+        echo "  WARNING: Ollama installation failed."
+        if $IS_WSL2; then
+            echo "  TIP: Install Ollama on Windows (https://ollama.com) or inside WSL2."
         else
-            echo "  Installing Ollama..."
-            if curl -fsSL https://ollama.com/install.sh 2>/dev/null | sh 2>&1; then
-                if command -v ollama &>/dev/null; then
-                    echo "  Ollama: installed"
-                    OLLAMA_URL="http://localhost:11434"
-                fi
-            fi
-            if [ -z "$OLLAMA_URL" ]; then
-                echo "  WARNING: Ollama installation failed."
-                echo "  You can set OLLAMA_URL to point to a remote Ollama server."
-                echo "  Example: export OLLAMA_URL=http://YOUR_SERVER:11434"
-            fi
+            echo "  You can set OLLAMA_URL to point to a remote Ollama server."
+            echo "  Example: export OLLAMA_URL=http://YOUR_SERVER:11434"
         fi
     fi
 fi
 
-# ── 4. Ensure Ollama runner & start service ──
+# WSL2 fallback: check Windows host if local Ollama not available
+if $IS_WSL2 && [ -z "$OLLAMA_URL" ]; then
+    WIN_HOST=$(ip route show default | awk '{print $3}')
+    if curl -sf --connect-timeout 3 "http://${WIN_HOST}:11434/api/tags" &>/dev/null; then
+        OLLAMA_URL="http://${WIN_HOST}:11434"
+        echo "  Ollama found on Windows host: $OLLAMA_URL"
+    fi
+fi
+
+# ── 4. Install Claude Code ──
 
 echo ""
-echo "[4/7] Checking Ollama service..."
+echo "[4/9] Installing Claude Code..."
+
+if command -v claude &>/dev/null; then
+    echo "  Claude Code: already installed"
+else
+    if command -v npm &>/dev/null; then
+        echo "  Installing via npm..."
+        npm install -g @anthropic-ai/claude-code 2>&1 | tail -5
+        if command -v claude &>/dev/null; then
+            echo "  Claude Code: installed"
+        else
+            echo "  WARNING: Claude Code installation may have failed."
+            echo "  Try manually: npm install -g @anthropic-ai/claude-code"
+        fi
+    else
+        echo "  WARNING: npm not found. Install Node.js first, then:"
+        echo "    npm install -g @anthropic-ai/claude-code"
+    fi
+fi
+
+# ── 5. Ensure Ollama runner & start service ──
+
+echo ""
+echo "[5/9] Starting Ollama service..."
 
 # Ollama 0.17+ spawns a subprocess called 'serve' for model inference.
 # In some environments (proot-distro, containers), this binary is not in PATH.
@@ -241,10 +275,10 @@ else
     echo "  Skipped (Ollama not configured)"
 fi
 
-# ── 5. Generate .mcp.json & install git hooks ──
+# ── 6. Generate .mcp.json ──
 
 echo ""
-echo "[5/7] Generating .mcp.json..."
+echo "[6/9] Generating .mcp.json..."
 
 if [ -f "$REPO_ROOT/.mcp.json" ]; then
     echo "  .mcp.json already exists, skipping (delete it to regenerate)"
@@ -253,8 +287,10 @@ else
     echo "  Generated .mcp.json"
 fi
 
+# ── 7. Install git hooks ──
+
 echo ""
-echo "[6/7] Installing git hooks..."
+echo "[7/9] Installing git hooks..."
 
 HOOKS_DIR="$REPO_ROOT/.git/hooks"
 if [ -d "$HOOKS_DIR" ]; then
@@ -265,10 +301,10 @@ else
     echo "  WARNING: .git/hooks not found. Run 'git init' first."
 fi
 
-# ── 7. Install Python dependencies ──
+# ── 8. Install Python dependencies ──
 
 echo ""
-echo "[7/7] Installing Python dependencies..."
+echo "[8/9] Installing Python dependencies..."
 
 install_with_pip() {
     # Create venv if needed
@@ -286,18 +322,18 @@ else
 fi
 echo "  Dependencies installed ($PKG_MANAGER)"
 
-# ── 8. Pull embedding model & build index ──
+# ── 9. Pull embedding model & build index ──
 
 echo ""
-echo "Setting up embedding model and index..."
+echo "[9/9] Setting up embedding model and index..."
 
 if [ -n "$OLLAMA_URL" ] && curl -sf --connect-timeout 3 "$OLLAMA_URL/api/tags" &>/dev/null; then
     echo "  Pulling bge-m3 embedding model (this may take a few minutes on first run)..."
-    if command -v ollama &>/dev/null && [ "$OLLAMA_URL" = "http://localhost:11434" ] && ! $IS_PROOT; then
-        # Local Ollama binary available: use CLI directly
+    if command -v ollama &>/dev/null && [ "$OLLAMA_URL" = "http://localhost:11434" ]; then
+        # Local Ollama: use CLI directly
         ollama pull bge-m3
     else
-        # Remote Ollama (WSL2/Windows, proot-distro, or custom URL): use API
+        # Remote Ollama: use API
         echo "  Using Ollama API at $OLLAMA_URL"
         curl -sf "$OLLAMA_URL/api/pull" -d '{"name":"bge-m3"}' | while IFS= read -r line; do
             status=$(echo "$line" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null)
@@ -336,11 +372,9 @@ if [ -n "$OLLAMA_URL" ] && curl -sf --connect-timeout 3 "$OLLAMA_URL/api/tags" &
 else
     echo "  Skipped (Ollama not reachable)."
     if [ -z "$OLLAMA_URL" ]; then
-        echo "  To enable RAG search, set OLLAMA_URL and re-run setup.sh:"
-        echo "    export OLLAMA_URL=http://YOUR_SERVER:11434"
-        echo "    ./setup.sh"
+        echo "  To enable RAG search, install Ollama and re-run ./setup.sh"
     else
-        echo "  Make sure Ollama is running at $OLLAMA_URL and re-run setup.sh."
+        echo "  Make sure Ollama is running at $OLLAMA_URL and re-run ./setup.sh"
     fi
 fi
 
@@ -351,8 +385,12 @@ echo "=== Setup complete! ==="
 echo ""
 echo "Next steps:"
 echo "  1. Fill in profile/about.md with your information"
-echo "  2. Open Claude Code in this directory"
-echo "  3. Start chatting! Use /journal to record your day"
+if ! command -v claude &>/dev/null; then
+    echo "  2. Install Claude Code: npm install -g @anthropic-ai/claude-code"
+    echo "  3. Run 'claude' in this directory"
+else
+    echo "  2. Run 'claude' in this directory"
+fi
 echo ""
 echo "Available commands:"
 echo "  /journal   - Record daily events"
