@@ -26,5 +26,22 @@
       "Bash(git push -f *)",
       "Bash(git branch -D *)"
     ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "life-rag"
+  ],
+  "mcpServers": {
+    "life-rag": {
+      "command": "/home/shun/.local/bin/uv",
+      "args": [
+        "--directory",
+        "/home/shun/life-rag-mcp",
+        "run",
+        "python",
+        "-m",
+        "life_rag_mcp.server"
+      ]
+    }
   }
 }
