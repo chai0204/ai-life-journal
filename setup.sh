@@ -135,12 +135,15 @@ if command -v uv &>/dev/null; then
     echo "  uv: already installed ($(uv --version))"
 else
     echo "  Installing uv..."
-    if curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh </dev/null 2>&1; then
-        export PATH="$HOME/.local/bin:$PATH"
-        if command -v uv &>/dev/null; then
-            PKG_MANAGER="uv"
-            echo "  uv: installed ($(uv --version))"
-        fi
+    # Disable pipefail temporarily: curl | sh pipeline may fail on some platforms
+    # (e.g. proot-distro) and we want to fall back to pip gracefully.
+    set +o pipefail
+    curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh </dev/null 2>&1 || true
+    set -o pipefail
+    export PATH="$HOME/.local/bin:$PATH"
+    if command -v uv &>/dev/null; then
+        PKG_MANAGER="uv"
+        echo "  uv: installed ($(uv --version))"
     fi
 
     if [ -z "$PKG_MANAGER" ]; then
@@ -171,11 +174,12 @@ elif command -v ollama &>/dev/null; then
     OLLAMA_URL="http://localhost:11434"
 else
     echo "  Installing Ollama..."
-    if curl -fsSL https://ollama.com/install.sh 2>/dev/null | sh </dev/null 2>&1; then
-        if command -v ollama &>/dev/null; then
-            echo "  Ollama: installed"
-            OLLAMA_URL="http://localhost:11434"
-        fi
+    set +o pipefail
+    curl -fsSL https://ollama.com/install.sh 2>/dev/null | sh </dev/null 2>&1 || true
+    set -o pipefail
+    if command -v ollama &>/dev/null; then
+        echo "  Ollama: installed"
+        OLLAMA_URL="http://localhost:11434"
     fi
 
     if [ -z "$OLLAMA_URL" ]; then
@@ -208,7 +212,7 @@ if command -v claude &>/dev/null; then
 else
     if command -v npm &>/dev/null; then
         echo "  Installing via npm..."
-        npm install -g @anthropic-ai/claude-code </dev/null 2>&1 | tail -5
+        npm install -g @anthropic-ai/claude-code </dev/null 2>&1 | tail -5 || true
         if command -v claude &>/dev/null; then
             echo "  Claude Code: installed"
         else
@@ -247,7 +251,7 @@ ensure_ollama_runner() {
 if [ -n "$OLLAMA_URL" ]; then
     # Ensure runner symlink before starting
     if command -v ollama &>/dev/null; then
-        ensure_ollama_runner
+        ensure_ollama_runner || true
     fi
 
     if curl -sf --connect-timeout 3 "$OLLAMA_URL/api/tags" &>/dev/null; then
@@ -330,8 +334,8 @@ install_with_pip() {
     if [ ! -d "$VENV_DIR" ]; then
         python3 -m venv "$VENV_DIR"
     fi
-    "$VENV_DIR/bin/pip" install --upgrade pip 2>&1 | tail -1
-    "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1
+    "$VENV_DIR/bin/pip" install --upgrade pip 2>&1 | tail -1 || true
+    "$VENV_DIR/bin/pip" install -e "$RAG_DIR" 2>&1 | tail -1 || true
 }
 
 if [ "$PKG_MANAGER" = "uv" ]; then
